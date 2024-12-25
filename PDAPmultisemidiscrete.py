@@ -1,5 +1,5 @@
 import ProblemNN2D as p2d
-from ProblemNN2D import NN2D
+from ProblemNN2D import NN2D, NeuralMeasure, Phi
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
@@ -27,11 +27,14 @@ class PDAPOptimizer:
             optimizer_opts: Optional optimization parameters
         """
         self.problem = problem
+        # with AlgOpt() the default instance created
         self.opts = optimizer_opts or AlgOpts()
+        
 
     def compute_norm(self, u: torch.Tensor, N: int) -> torch.Tensor:
         """Compute norm of reshaped tensor"""
         return torch.norm(u.reshape(N, -1), dim=0)
+    
 
     def optimize(self, y_ref: torch.Tensor, alpha: float, phi: Phi) -> Tuple[NeuralMeasure, Dict]:
         N = self.problem.N
