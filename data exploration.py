@@ -2,12 +2,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
-data = np.load("VDP_beta_0.5.npy")
+data_path = 'data/VDP_beta_3_patch1.npy'
+data = np.load(data_path)
 
 print(data.shape)
 
 # Filter out NaN values if any
-valid_data = data[~np.isnan(data['V'])]
+valid_data = data[~np.isnan(data['v'])]
 print(f"Valid data points: {valid_data.shape[0]}")
 
 # Create a 3D scatter plot
@@ -15,9 +16,9 @@ fig = plt.figure(figsize=(10, 8))
 ax = fig.add_subplot(111, projection='3d')
 
 # Extract x0 (which has 2 components) and V
-x0_comp1 = valid_data['x0'][:, 0]  # First component of x0
-x0_comp2 = valid_data['x0'][:, 1]  # Second component of x0
-v_values = valid_data['V']
+x0_comp1 = valid_data['x'][:, 0]  # First component of x0
+x0_comp2 = valid_data['x'][:, 1]  # Second component of x0
+v_values = valid_data['v']
 
 # Create scatter plot
 scatter = ax.scatter(x0_comp1, x0_comp2, v_values, c=v_values, cmap='viridis', 

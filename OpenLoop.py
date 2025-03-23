@@ -7,10 +7,8 @@ Created on Tue Dec  3 18:30:52 2024
 """
 
 
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 import numpy as np
-import discretization as dis
+import utils 
 from scipy.integrate import solve_bvp
 import matplotlib.pyplot as plt
 
@@ -67,7 +65,7 @@ class OpenLoopOptimizer:
     def optimize(self):
         """Run optimization loop"""
         # Initialize
-        u0 = dis.gen("pw", np.zeros(self.grid.size), self.grid)
+        u0 = utils.gen("pw", np.zeros(self.grid.size), self.grid)
         sol0 = self.sol_BVP(u0)
         G0 = self.gradient(u0(sol0.x), sol0.y[3,:])
         
@@ -75,7 +73,7 @@ class OpenLoopOptimizer:
         grid0 = sol0.x
 
         u1_coeff = - (1/10) * G0
-        u1 = dis.gen("pw", u1_coeff, sol0.x)
+        u1 = utils.gen("pw", u1_coeff, sol0.x)
         sol1 = self.sol_BVP(u1)
         G1 = self.gradient(u1(sol1.x), sol1.y[3,:])
 
@@ -83,7 +81,7 @@ class OpenLoopOptimizer:
         # Optimization loop
         k = 1
         store = True
-        while dis.L2(sol1.x, G1) >= self.tol and store:
+        while utils.L2(sol1.x, G1) >= self.tol and store:
             bb_step = self.BBstep(u0(sol1.x), u1(sol1.x), np.interp(sol1.x, grid0, G0), G1)
             if k % 2 == 0:
                 alpha = 1 / bb_step[0]
@@ -93,7 +91,7 @@ class OpenLoopOptimizer:
             u2_coeff = u1(sol1.x) - alpha * G1
             u0, G0, grid0 = u1, G1, sol1.x
 
-            u1 = dis.gen("pw", u2_coeff, sol1.x)
+            u1 = utils.gen("pw", u2_coeff, sol1.x)
             sol1 = self.sol_BVP(u1)
             G1 = self.gradient(u1(sol1.x), sol1.y[3,:])
 
@@ -101,7 +99,7 @@ class OpenLoopOptimizer:
 
             # print(f" k = {k}")
             # print(f" alpha = {alpha}")
-            # print(f" norm G = {dis.L2(sol1.x, G1)}")
+            # print(f" norm G = {utils.L2(sol1.x, G1)}")
             
             if k == self.max_it:
                 store = False
@@ -114,7 +112,7 @@ class OpenLoopOptimizer:
             ])
             V = self.V(sol1.x, u1(sol1.x), sol1.y[0,:], sol1.y[1,:])
             print(f" cost = {V}")
-            print(f" norm G = {dis.L2(sol1.x, G1)}")
+            print(f" norm G = {utils.L2(sol1.x, G1)}")
 
             # fig = plt.figure(figsize=(10, 8))
             # ax = fig.add_subplot(111, projection='3d')
