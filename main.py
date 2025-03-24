@@ -69,72 +69,72 @@ def V(grid, u, y1, y2):
 
 if __name__ == "__main__":
     """=====================DATA GENERATION======================"""
-    # grid = np.linspace(0, 3, 1000)
-    # guess = np.ones((4, grid.size))
-    # tol = 1e-6
-    # N = 50
-    # dataset = np.zeros(N, dtype=dtype)
-    # max_it = 500
+    grid = np.linspace(0, 3, 1000)
+    guess = np.ones((4, grid.size))
+    tol = 1e-6
+    N = 50
+    dataset = np.zeros(N, dtype=dtype)
+    max_it = 500
 
 
-    # def gen_bc(ini):
-    #     def bc(ya, yb):
-    #         """Boundary conditions"""
-    #         return np.array([
-    #             ya[0] - ini[0],
-    #             ya[1] - ini[1],
-    #             yb[2],
-    #             yb[3]
-    #         ])
-    #     return bc
+    def gen_bc(ini):
+        def bc(ya, yb):
+            """Boundary conditions"""
+            return np.array([
+                ya[0] - ini[0],
+                ya[1] - ini[1],
+                yb[2],
+                yb[3]
+            ])
+        return bc
 
-    # print(f"N = {N}")
-    # for i in range(N):
-    #     ini = np.random.uniform(0, 3, 2)
-    #     bc = gen_bc(ini)
-    #     print(f"i = {i}")
-    #     print(f"ini = {ini}")
-    #     dv, v = op.OpenLoopOptimizer(VDP, bc, V, gradient, grid, guess, tol, max_it).optimize()
-    #     if dv is not None and not np.isnan(v):
-    #         dataset[i] = (ini, dv, v)
+    print(f"N = {N}")
+    for i in range(N):
+        ini = np.random.uniform(0, 3, 2)
+        bc = gen_bc(ini)
+        print(f"i = {i}")
+        print(f"ini = {ini}")
+        dv, v = op.OpenLoopOptimizer(VDP, bc, V, gradient, grid, guess, tol, max_it).optimize()
+        if dv is not None and not np.isnan(v):
+            dataset[i] = (ini, dv, v)
         
-    # np.save("VDP_beta_3.npy", dataset)
+    np.save("VDP_beta_3_1.npy", dataset)
 
 
     """=====================Greedy Insertion and Training======================"""
-    path = 'data/VDP_beta_3_patch1.npy'# Initialize the weights
-    power = 2.5
-    gamma = 4
-    M = 40
-    alpha = 0.1
-    dataset = np.load(path)
-    # Initialize the model with zero weights
+    # path = 'data/VDP_beta_3_patch1.npy'# Initialize the weights
+    # power = 2.5
+    # gamma = 4
+    # M = 40
+    # alpha = 0.1
+    # dataset = np.load(path)
+    # # Initialize the model with zero weights
 
-    model, _, _ = network(dataset, power, ('phi', gamma, 0)) 
-    weight, bias = insertion(dataset, model, M)
-    print("Initialization done")
-    print(f"Initial weights shape: {weight.shape}, bias shape: {bias.shape}")
+    # model, _, _ = network(dataset, power, ('phi', gamma, 0)) 
+    # weight, bias = insertion(dataset, model, M)
+    # print("Initialization done")
+    # print(f"Initial weights shape: {weight.shape}, bias shape: {bias.shape}")
     
-    # Training the model
-    for i in range(30):   
-        print(f"\n----- Iteration {i} -----")
-        weight_temp, bias_temp = insertion(dataset, model, M)
-        # Convert PyTorch tensors to NumPy arrays if needed
-        if hasattr(weight_temp, 'numpy'):
-            print("Converting weight_temp from PyTorch tensor to NumPy array")
-            weight_temp = weight_temp.numpy()
+    # # Training the model
+    # for i in range(30):   
+    #     print(f"\n----- Iteration {i} -----")
+    #     weight_temp, bias_temp = insertion(dataset, model, M)
+    #     # Convert PyTorch tensors to NumPy arrays if needed
+    #     if hasattr(weight_temp, 'numpy'):
+    #         print("Converting weight_temp from PyTorch tensor to NumPy array")
+    #         weight_temp = weight_temp.numpy()
         
-        if hasattr(bias_temp, 'numpy'):
-            print("Converting bias_temp from PyTorch tensor to NumPy array")
-            bias_temp = bias_temp.numpy()
+    #     if hasattr(bias_temp, 'numpy'):
+    #         print("Converting bias_temp from PyTorch tensor to NumPy array")
+    #         bias_temp = bias_temp.numpy()
         
-        print(f"Iteration {i} - weight_temp shape: {weight_temp.shape}, bias_temp shape: {bias_temp.shape}")
-        print(f"Iteration {i} - weight shape: {weight.shape}, bias shape: {bias.shape}")
+    #     print(f"Iteration {i} - weight_temp shape: {weight_temp.shape}, bias_temp shape: {bias_temp.shape}")
+    #     print(f"Iteration {i} - weight shape: {weight.shape}, bias shape: {bias.shape}")
    
-        weight = np.concatenate((weight, weight_temp), axis=0)
-        bias = np.concatenate((bias, bias_temp), axis=0)
-        model, weight, bias = network(dataset, power, ('phi', gamma, 0.5), inner_weights = weight, inner_bias = bias)
-        print(f"After concatenation - weight shape: {weight.shape}, bias shape: {bias.shape}")
+    #     weight = np.concatenate((weight, weight_temp), axis=0)
+    #     bias = np.concatenate((bias, bias_temp), axis=0)
+    #     model, weight, bias = network(dataset, power, ('phi', gamma, 0.5), inner_weights = weight, inner_bias = bias)
+    #     print(f"After concatenation - weight shape: {weight.shape}, bias shape: {bias.shape}")
 
     
     
