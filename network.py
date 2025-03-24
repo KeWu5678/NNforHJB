@@ -14,21 +14,12 @@ import os
 import deepxde as dde
 from scipy.spatial import KDTree
 
-"""
-Train the network with the dataset (x, V(x), dV/dx)
-args:
-    inner_weights: shape = (N, 2)
-    inner_bias: shape = (N, 1)
-    path: the path of the dataset
-return:
-    model: the trained model
-"""
 
 def network(data, power, regularization, inner_weights = None, inner_bias = None):
     """
     args:
-        inner_weights: (2, N)
-        inner_bias: (1, N)
+        inner_weights: (N, 2) - matrix with N rows (number of neurons) and 2 columns (input features)
+        inner_bias: (N,) - vector with N bias values, one per neuron
         path: tuple of (x, v, dv)
     return:
         model: the trained model
@@ -92,10 +83,21 @@ def network(data, power, regularization, inner_weights = None, inner_bias = None
         auxiliary_var_function=aux_function,
         solution=value_function
     )
+    
     if inner_weights is None:
+        # if no weights are given, use default 2 neurons
         n = 0
     else:
+        # Check and print shapes for debugging
+        print(f"DEBUG - inner_weights shape: {inner_weights.shape}")
+        if inner_bias is not None:
+            print(f"DEBUG - inner_bias shape: {inner_bias.shape}")
+        
+        # Number of neurons is the first dimension for PyTorch
         n = inner_weights.shape[0]
+        print(f"Creating network with {n} neurons")
+    
+    # Layer sizes: input dimension, hidden layer size, output dimension
     net = dde.nn.SHALLOW(
         [2] + [n] + [1], "relu", "Glorot normal", p = power, inner_weights = inner_weights, 
         inner_bias = inner_bias, regularization = regularization
@@ -105,9 +107,12 @@ def network(data, power, regularization, inner_weights = None, inner_bias = None
 
     current_dir = os.path.dirname(os.path.abspath(__file__))
     model_save_path = os.path.join(current_dir, "train_history")
+    os.makedirs(model_save_path, exist_ok=True)
+    print(f"Training model, saving to {model_save_path}")
     losshistory, train_state = model.train(iterations=2000, display_every=1000, model_save_path=model_save_path)
 
     # Detach the tensors to remove them from the computation graph before returning
-    return model, model.net.output.weight.detach(), model.net.output.bias.detach()
+    weight, bias = model.net.get_hidden_params()
+    return model, weight.numpy(), bias.numpy()
 
 

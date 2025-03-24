@@ -111,12 +111,13 @@ if __name__ == "__main__":
     # Initialize the model with zero weights
 
     model, _, _ = network(dataset, power, ('phi', gamma, 0)) 
-    weights, bias = insertion(dataset, model, M)
+    weight, bias = insertion(dataset, model, M)
     print("Initialization done")
-    print(f"Initial weights shape: {weights.shape}, bias shape: {bias.shape}")
+    print(f"Initial weights shape: {weight.shape}, bias shape: {bias.shape}")
     
     # Training the model
-    for i in range(600):   
+    for i in range(30):   
+        print(f"\n----- Iteration {i} -----")
         weight_temp, bias_temp = insertion(dataset, model, M)
         # Convert PyTorch tensors to NumPy arrays if needed
         if hasattr(weight_temp, 'numpy'):
@@ -126,14 +127,14 @@ if __name__ == "__main__":
         if hasattr(bias_temp, 'numpy'):
             print("Converting bias_temp from PyTorch tensor to NumPy array")
             bias_temp = bias_temp.numpy()
-            bias_temp = bias_temp.reshape(1, -1)
-
+        
         print(f"Iteration {i} - weight_temp shape: {weight_temp.shape}, bias_temp shape: {bias_temp.shape}")
-        print(f"Iteration {i} - weight shape: {weights.shape}, bias shape: {bias.shape}")
+        print(f"Iteration {i} - weight shape: {weight.shape}, bias shape: {bias.shape}")
    
-        weights = np.concatenate((weights, weight_temp), axis=0)
+        weight = np.concatenate((weight, weight_temp), axis=0)
         bias = np.concatenate((bias, bias_temp), axis=0)
-        print(f"After concatenation - weights shape: {weights.shape}, bias shape: {bias.shape}")
+        model, weight, bias = network(dataset, power, ('phi', gamma, 0.5), inner_weights = weight, inner_bias = bias)
+        print(f"After concatenation - weight shape: {weight.shape}, bias shape: {bias.shape}")
 
     
     

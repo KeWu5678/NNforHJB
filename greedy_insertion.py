@@ -10,7 +10,8 @@ def insertion(data, model, N):
         model: trained model in the last step. 
         N: number of neurons inserted
     return:
-        result_z: np.ndarray, shape = (N, 2), shape = (N, 1)
+        weights: np.ndarray, shape = (N, 2) for PyTorch linear layer
+        bias: np.ndarray, shape = (N,) for PyTorch linear layer
     """
 
     # Get the data first
@@ -46,9 +47,11 @@ def insertion(data, model, N):
 
     def stereo(z):
         """
-        here z is given as a (2, 1) np.array
-        return shape: (2, 1), (1, 1)
-        """
+        here z is given as a (2, n) np.array
+        return shape: (2, n), (1, n)
+        """ 
+        if z.shape[0] != 2:
+            raise ValueError("z must be a (2, n) np.array")
         denominator = (1 + np.sum(z**2, axis=0)).reshape(1, -1)
         return [
             (2 * z) / denominator, 
@@ -99,11 +102,30 @@ def insertion(data, model, N):
         if res.fun < - alpha:
             result.append(res.x)
     
-    result_z = np.array(result)
-    result_z = remove_duplicates(result_z, tolerance=1e-5)
-    print(f"result_z: {result_z}")
-    result_a, result_b = stereo(result_z)
-    return result_a.T, result_b.T
+    # Transfer the dimension
+    result_z_raw = np.array(result)
+    result_z_removed = remove_duplicates(result_z_raw, tolerance=1e-5)
+    result_z_final = result_z_removed.T
+
+    #print(f"result_z: {result_z_removed}")
+    result_a, result_b = stereo(result_z_final)
+    #print(f"result_a.shape: {result_a.shape}")
+    #print(f"result_b.shape: {result_b.shape}")
+
+    result_b = result_b.squeeze(axis=0)
+
+
+    if result_a.T.shape[1] != 2:
+        print(f"Warning: Unexpected shape for result_a.T: {result_a.T.shape}")
+        print(f"result_z.shape.raw: {result_z_raw.shape}")
+        print(f"result_z.shape.removed: {result_z_removed.shape}")
+        print(f"result_a.shape: {result_a.shape}")
+        print(f"result_b.shape: {result_b.shape}")
+    if len(result_b.shape) != 1:
+        print(f"Warning: Unexpected shape for result_b: {result_b.shape}")
+        print(f"result_final: {result_z_final}")
+        print(f"result_b: {result_b}")
+    return result_a.T, result_b
 
 
     
