@@ -99,7 +99,7 @@ def network(data, power, regularization, inner_weights = None, inner_bias = None
     
     # Layer sizes: input dimension, hidden layer size, output dimension
     net = dde.nn.SHALLOW(
-        [2] + [n] + [1], "relu", "Glorot normal", p = power, inner_weights = inner_weights, 
+        [2] + [n] + [1], "tanh", "Glorot normal", p = power, inner_weights = inner_weights, 
         inner_bias = inner_bias, regularization = regularization
         )
     model = dde.Model(data, net)
@@ -109,7 +109,7 @@ def network(data, power, regularization, inner_weights = None, inner_bias = None
     model_save_path = os.path.join(current_dir, "train_history")
     os.makedirs(model_save_path, exist_ok=True)
     print(f"Training model, saving to {model_save_path}")
-    losshistory, train_state = model.train(iterations=2000, display_every=1000, model_save_path=model_save_path)
+    losshistory, train_state = model.train(iterations=20000, display_every=1000, model_save_path=model_save_path)
 
     # Detach the tensors to remove them from the computation graph before returning
     weight, bias = model.net.get_hidden_params()

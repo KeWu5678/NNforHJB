@@ -9,7 +9,7 @@ Created on Mon Nov 25 20:32:26 2024
 import os
 os.environ["DDE_BACKEND"] = "pytorch"
 
-import OpenLoop as op
+import openloop_legendre as op
 import numpy as np
 import numpy.polynomial.chebyshev as cheb
 import utils 
@@ -65,6 +65,16 @@ def gradient(u, p):
 def V(grid, u, y1, y2):
     return utils.L2(grid, u) * beta + 0.5 * (utils.L2(grid, y1) + utils.L2(grid, y2))
 
+def gen_bc(ini_val):
+    """Generate boundary conditions based on initial values"""
+    def bc_func(ya, yb):
+        return np.array([
+            ya[0] - ini_val[0],
+            ya[1] - ini_val[1],
+            yb[2],
+            yb[3]
+        ])
+    return bc_func
 
 
 if __name__ == "__main__":
@@ -72,36 +82,52 @@ if __name__ == "__main__":
     grid = np.linspace(0, 3, 1000)
     guess = np.ones((4, grid.size))
     tol = 1e-6
-    N = 50
-    dataset = np.zeros(N, dtype=dtype)
     max_it = 500
-
-
-    def gen_bc(ini):
-        def bc(ya, yb):
-            """Boundary conditions"""
-            return np.array([
-                ya[0] - ini[0],
-                ya[1] - ini[1],
-                yb[2],
-                yb[3]
-            ])
-        return bc
+    
+    # Create a 30x30 grid of initial conditions
+    # Define the range for each dimension
+    x1_min, x1_max = 0, 3.0  # Range for first component
+    x2_min, x2_max = 0, 3.0  # Range for second component
+    
+    # Create 1D arrays for each dimension
+    x1_values = np.linspace(x1_min, x1_max, 30)
+    x2_values = np.linspace(x2_min, x2_max, 30)
+    
+    # Create a meshgrid
+    X1, X2 = np.meshgrid(x1_values, x2_values)
+    
+    # Reshape the meshgrid to get a list of all combinations
+    x0_values = np.column_stack((X1.flatten(), X2.flatten()))
+    
+    # Total number of grid points
+    N = len(x0_values)
+    print(f"Created a 30x30 grid with {N} points")
+    
+    # Initialize dataset
+    dataset = np.zeros(N, dtype=dtype)
 
     print(f"N = {N}")
     for i in range(N):
-        ini = np.random.uniform(0, 3, 2)
-        bc = gen_bc(ini)
+        # Get initial condition from the grid
+        ini = x0_values[i]
+        
+        # Generate boundary conditions
+        bc_func = gen_bc(ini)
+        
         print(f"i = {i}")
         print(f"ini = {ini}")
-        dv, v = op.OpenLoopOptimizer(VDP, bc, V, gradient, grid, guess, tol, max_it).optimize()
+        dv, v = op.OpenLoopOptimizer(VDP, bc_func, V, gradient, grid, guess, tol, max_it).optimize()
         if dv is not None and not np.isnan(v):
             dataset[i] = (ini, dv, v)
         
-    np.save("VDP_beta_3_1.npy", dataset)
+    # Use a filename that indicates grid sampling
+    output_file = "VDP_beta_3_grid_30x30.npy"
+    
+    print(f"Saving results to {output_file}")
+    np.save(output_file, dataset)
 
 
-    """=====================Greedy Insertion and Training======================"""
+    # """=====================Greedy Insertion and Training======================"""
     # path = 'data/VDP_beta_3_patch1.npy'# Initialize the weights
     # power = 2.5
     # gamma = 4
