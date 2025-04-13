@@ -17,7 +17,7 @@ import deepxde as dde
 dde.config.backend = "pytorch"
 print(f"Using backend: {dde.backend.backend_name}")
 
-from network import network
+from network_torch import network
 from greedy_insertion import insertion
 
 
@@ -81,8 +81,8 @@ if __name__ == "__main__":
     """=====================DATA GENERATION======================"""
     grid = np.linspace(0, 3, 1000)
     guess = np.ones((4, grid.size))
-    tol = 1e-6
-    max_it = 500
+    tol = 1e-5
+    max_it = 1000
     
     # Create a 30x30 grid of initial conditions
     # Define the range for each dimension
@@ -105,6 +105,9 @@ if __name__ == "__main__":
     
     # Initialize dataset
     dataset = np.zeros(N, dtype=dtype)
+    
+    # Track failed initial conditions
+    failed_ini = []
 
     print(f"N = {N}")
     for i in range(N):
@@ -119,32 +122,88 @@ if __name__ == "__main__":
         dv, v = op.OpenLoopOptimizer(VDP, bc_func, V, gradient, grid, guess, tol, max_it).optimize()
         if dv is not None and not np.isnan(v):
             dataset[i] = (ini, dv, v)
+        else:
+            # Store failed initial condition
+            failed_ini.append(ini)
+            print(f"Failed to converge for ini = {ini}")
         
     # Use a filename that indicates grid sampling
     output_file = "VDP_beta_3_grid_30x30.npy"
+    
+    # Save failed initial conditions
+    failed_output_file = "VDP_beta_3_failed_ini.npy"
+    if failed_ini:
+        failed_ini = np.array(failed_ini)
+        print(f"Saving {len(failed_ini)} failed initial conditions to {failed_output_file}")
+        np.save(failed_output_file, failed_ini)
+    else:
+        print("All initial conditions converged successfully")
     
     print(f"Saving results to {output_file}")
     np.save(output_file, dataset)
 
 
     # """=====================Greedy Insertion and Training======================"""
-    # path = 'data/VDP_beta_3_patch1.npy'# Initialize the weights
+    # path = 'data/VDP_beta_3_grid_30x30.npy'# Initialize the weights
     # power = 2.5
-    # gamma = 4
+    # gamma = 0.01
     # M = 40
     # alpha = 0.1
     # dataset = np.load(path)
+    
+    # # Data inspection
+    # print(f"Loaded dataset from {path}")
+    # print(f"Dataset shape: {dataset.shape}")
+    # print(f"Dataset dtype: {dataset.dtype}")
+    
+    # # Check for NaN or empty values
+    # nan_count = 0
+    # valid_count = 0
+    # for i, item in enumerate(dataset):
+    #     if np.isnan(item['v']) or np.isnan(item['x']).any() or np.isnan(item['dv']).any():
+    #         nan_count += 1
+    #         if nan_count < 5:  # Only print first few examples
+    #             print(f"NaN values found at index {i}: {item}")
+    #     else:
+    #         valid_count += 1
+            
+    # print(f"Valid data points: {valid_count}")
+    # print(f"Data points with NaN values: {nan_count}")
+    
+    # # If we have valid data, print a few examples
+    # if valid_count > 0:
+    #     print("\nFirst 3 valid data points:")
+    #     count = 0
+    #     for item in dataset:
+    #         if not np.isnan(item['v']) and not np.isnan(item['x']).any() and not np.isnan(item['dv']).any():
+    #             print(f"x: {item['x']}, dv: {item['dv']}, v: {item['v']}")
+    #             count += 1
+    #             if count >= 3:
+    #                 break
+    
+    # # Convert to dictionary format
+    # data_dict = {
+    #     'x': np.array([item[0] for item in dataset]),
+    #     'dv': np.array([item[1] for item in dataset]),
+    #     'v': np.array([item[2] for item in dataset])
+    # }
+    
+    # # Check processed data
+    # print(f"\nProcessed data shapes:")
+    # print(f"x shape: {data_dict['x'].shape}")
+    # print(f"dv shape: {data_dict['dv'].shape}")
+    # print(f"v shape: {data_dict['v'].shape}")
+    
     # # Initialize the model with zero weights
-
-    # model, _, _ = network(dataset, power, ('phi', gamma, 0)) 
-    # weight, bias = insertion(dataset, model, M)
+    # model, _, _ = network(data_dict, power, ('phi', gamma, 0)) 
+    # weight, bias = insertion(data_dict, model, M)
     # print("Initialization done")
     # print(f"Initial weights shape: {weight.shape}, bias shape: {bias.shape}")
     
     # # Training the model
     # for i in range(30):   
     #     print(f"\n----- Iteration {i} -----")
-    #     weight_temp, bias_temp = insertion(dataset, model, M)
+    #     weight_temp, bias_temp = insertion(data_dict, model, M)
     #     # Convert PyTorch tensors to NumPy arrays if needed
     #     if hasattr(weight_temp, 'numpy'):
     #         print("Converting weight_temp from PyTorch tensor to NumPy array")
@@ -159,8 +218,14 @@ if __name__ == "__main__":
    
     #     weight = np.concatenate((weight, weight_temp), axis=0)
     #     bias = np.concatenate((bias, bias_temp), axis=0)
-    #     model, weight, bias = network(dataset, power, ('phi', gamma, 0.5), inner_weights = weight, inner_bias = bias)
+    #     model, weight, bias = network(data_dict, power, ('phi', gamma, 0.5), inner_weights = weight, inner_bias = bias)
     #     print(f"After concatenation - weight shape: {weight.shape}, bias shape: {bias.shape}")
+        
+    #     # Check if model has NaN values
+    #     test_pred = model.predict(data_dict['x'][:1])
+    #     if np.isnan(test_pred).any():
+    #         print("WARNING: Model contains NaN values. Stopping training.")
+    #         break
 
     
     

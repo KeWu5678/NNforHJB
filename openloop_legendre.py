@@ -82,6 +82,7 @@ class OpenLoopOptimizer:
         grid1 = sol1.x
         G1_coeff = utils.fit_legendre(grid1, G1, num_basis)
         alpha = 0.01
+
         # Optimization loop
         k = 1
         store = True
@@ -101,7 +102,7 @@ class OpenLoopOptimizer:
             #         alpha = 1 / bb_step[1]
             #     else:
             #         # Fallback if BB step is problematic
-            #         alpha = 0.1  # Default safe step size
+            #         alpha = 0.01  # Default safe step size
             
             # # Bound step size for stability
             # alpha = min(max(alpha, 1e-4), 10.0)

@@ -39,7 +39,7 @@ def insertion(data, model, N):
     # Then use the data
     K = len(X_train)
     p = model.net.p
-    alpha = model.net.alpha
+    alpha = model.alpha
 
 
     #A = (2 * Z) / (1 + np.sum(Z**2, axis=1)).reshape(-1, 1) #shape = (N, 2)

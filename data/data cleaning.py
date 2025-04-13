@@ -8,20 +8,17 @@ import pickle
 # Define the file paths for all VDP beta files
 
 
-combined_data = np.load('data_vdp_legendre_beta=3.npy')
+combined_data = np.load('VDP_beta_3_grid_30x30.npy')
 
 # Filter out NaN values if any
 valid_data = combined_data[~np.isnan(combined_data['v'])]
 print(f"Valid data points: {valid_data.shape[0]}")
 
-# Create a 3D scatter plot
-fig = plt.figure(figsize=(10, 8))
-ax = fig.add_subplot(111, projection='3d')
-
 # Extract x0 (which has 2 components) and V
 x0_comp1 = valid_data['x'][:, 0]  # First component of x0
 x0_comp2 = valid_data['x'][:, 1]  # Second component of x0
 v_values = valid_data['v']
+dv_values = valid_data['dv']  # Extract gradient vectors
 
 # Extract all initial conditions (x0) and save as NumPy file
 x0_values = valid_data['x']  # All x0 values
@@ -39,37 +36,89 @@ print(f"Max value: {np.max(v_values)}")
 print(f"Mean value: {np.mean(v_values)}")
 print(f"Std deviation: {np.std(v_values)}")
 
-# Create scatter plot
-scatter = ax.scatter(x0_comp1, x0_comp2, v_values, c=v_values, cmap='viridis', 
-                    s=50, alpha=0.8)
+# Create a 2D plot to visualize gradient vectors
+plt.figure(figsize=(12, 10))
 
-# Add a color bar
-cbar = fig.colorbar(scatter, ax=ax, shrink=0.7)
+# Create a scatter plot of the points
+scatter = plt.scatter(x0_comp1, x0_comp2, c=v_values, cmap='viridis', 
+                     s=30, alpha=0.6)
+
+# Create a grid of points for more evenly distributed vectors
+grid_size = 15  # Adjust this for more or fewer vectors
+x_min, x_max = np.min(x0_comp1), np.max(x0_comp1)
+y_min, y_max = np.min(x0_comp2), np.max(x0_comp2)
+x_grid = np.linspace(x_min, x_max, grid_size)
+y_grid = np.linspace(y_min, y_max, grid_size)
+X_grid, Y_grid = np.meshgrid(x_grid, y_grid)
+
+# For each grid point, find the nearest data point and use its gradient
+for i in range(grid_size):
+    for j in range(grid_size):
+        x_point = X_grid[i, j]
+        y_point = Y_grid[i, j]
+        
+        # Find closest data point
+        distances = (x0_comp1 - x_point)**2 + (x0_comp2 - y_point)**2
+        closest_idx = np.argmin(distances)
+        
+        # Get gradient at that point
+        dx = dv_values[closest_idx, 0]
+        dy = dv_values[closest_idx, 1]
+        
+        # Normalize for better visualization
+        magnitude = np.sqrt(dx**2 + dy**2)
+        if magnitude > 0:  # Avoid division by zero
+            # Scale inversely with magnitude for better visualization
+            scale = 0.15 * (1.0 / (1.0 + 0.5 * magnitude))
+            plt.arrow(x_point, y_point, dx*scale, dy*scale, 
+                     head_width=0.05, head_length=0.08, fc='red', ec='red', alpha=0.7)
+
+# Add colorbar and labels
+cbar = plt.colorbar(scatter)
 cbar.set_label('Value Function (V)')
-# Set labels and title
-ax.set_xlabel('x₀[0]')
-ax.set_ylabel('x₀[1]')
-ax.set_zlabel('Value Function (V)')
-ax.set_title('Combined VDP Data (β=3): Initial Conditions vs Value Function')
-# Adjust view angle
-ax.view_init(elev=30, azim=45)
-plt.tight_layout()
+plt.xlabel('x₀[0]')
+plt.ylabel('x₀[1]')
+plt.title('Value Function with Gradient Vectors (2D View)')
+plt.grid(True, alpha=0.3)
 
-# Save as regular image
-plt.savefig('VDP_legendre_plot.png', dpi=300)
-
-# Save the figure as a pickle for interactive use later
-pickle_file = 'VDP_legendre_plot.pickle'
-with open(pickle_file, 'wb') as f:
-    pickle.dump(fig, f)
-print(f"Saved interactive plot to {pickle_file}")
-
-# You can later load and interact with the figure using:
-# with open('VDP_legendre_plot.pickle', 'rb') as f:
-#     fig = pickle.load(f)
-# plt.show()
-
+# Save as high-resolution image
+plt.savefig('VDP_gradient_vectors_2D_grid.png', dpi=300, bbox_inches='tight')
 plt.show()
+
+ini = np.load("VDP_beta_3_failed_ini.npy")
+print(ini)
+
+# # Previous 3D plot code is commented out
+# # Create a 3D scatter plot
+# fig = plt.figure(figsize=(10, 8))
+# ax = fig.add_subplot(111, projection='3d')
+# 
+# # Create scatter plot
+# scatter = ax.scatter(x0_comp1, x0_comp2, v_values, c=v_values, cmap='viridis', 
+#                     s=50, alpha=0.8)
+# 
+# # Add a color bar
+# cbar = fig.colorbar(scatter, ax=ax, shrink=0.7)
+# cbar.set_label('Value Function (V)')
+# # Set labels and title
+# ax.set_xlabel('x₀[0]')
+# ax.set_ylabel('x₀[1]')
+# ax.set_zlabel('Value Function (V)')
+# ax.set_title('Combined VDP Data (β=3): Initial Conditions vs Value Function')
+# # Adjust view angle
+# ax.view_init(elev=30, azim=45)
+# plt.tight_layout()
+# 
+# # Save as regular image
+# plt.savefig('VDP_legendre_plot.png', dpi=300)
+# 
+# # Save the figure as a pickle for interactive use later
+# pickle_file = 'VDP_legendre_plot.pickle'
+# with open(pickle_file, 'wb') as f:
+#     pickle.dump(fig, f)
+# print(f"Saved interactive plot to {pickle_file}")
+# 
+# plt.show()
 
 # # 2D plots to see individual component relationships
 # plt.figure(figsize=(16, 6))
