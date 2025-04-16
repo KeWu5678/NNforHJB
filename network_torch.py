@@ -350,7 +350,7 @@ def network(data, power, regularization = None, inner_weights=None, inner_bias=N
 
 
 if __name__ == "__main__":
-    data = np.load("data/VDP_beta_3_grid_30x30.npy")
+    data = np.load("data_result/VDP_beta_3_grid_30x30.npy")
     weights = np.random.randn(1000, 2)
     bias = np.random.randn(1000)
     regularization = ('phi', 0.01, 0.5)

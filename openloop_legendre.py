@@ -81,33 +81,35 @@ class OpenLoopOptimizer:
         G1 = self.gradient(u1(sol1.x), sol1.y[3,:])
         grid1 = sol1.x
         G1_coeff = utils.fit_legendre(grid1, G1, num_basis)
-        alpha = 0.01
+        
+        # Initial step size (will be adapted)
+        alpha = 0.1
 
         # Optimization loop
         k = 1
         store = True
         while utils.L2(grid1, G1) >= self.tol and store:
             # Get BB step sizes with safety checks
-            # bb_step = self.BBstep(u0_coeff, u1_coeff, G0_coeff, G1_coeff)
+            bb_step = self.BBstep(u0_coeff, u1_coeff, G0_coeff, G1_coeff)
             
-            # # Safely compute step size with checks
-            # if k % 2 == 0:
-            #     if abs(bb_step[0]) > 1e-20 and not np.isnan(bb_step[0]) and not np.isinf(bb_step[0]):
-            #         alpha = 1 / bb_step[0]
-            #     else:
-            #         # Fallback if BB step is problematic
-            #         alpha = 0.1  # Default safe step size
-            # else:
-            #     if abs(bb_step[1]) > 1e-20 and not np.isnan(bb_step[1]) and not np.isinf(bb_step[1]):
-            #         alpha = 1 / bb_step[1]
-            #     else:
-            #         # Fallback if BB step is problematic
-            #         alpha = 0.01  # Default safe step size
+            # Safely compute step size with checks
+            if k % 2 == 0:
+                if abs(bb_step[0]) > 1e-20 and not np.isnan(bb_step[0]) and not np.isinf(bb_step[0]):
+                    alpha = 1 / bb_step[0]
+                else:
+                    # Fallback if BB step is problematic
+                    alpha = 0.1  # Default safe step size
+            else:
+                if abs(bb_step[1]) > 1e-20 and not np.isnan(bb_step[1]) and not np.isinf(bb_step[1]):
+                    alpha = 1 / bb_step[1]
+                else:
+                    # Fallback if BB step is problematic
+                    alpha = 0.01  # Default safe step size
             
-            # # Bound step size for stability
-            # alpha = min(max(alpha, 1e-4), 10.0)
+            # Bound step size for stability
+            alpha = min(max(alpha, 1e-4), 1000.0)
 
-            
+                
             # Update coefficients - IMPORTANT: work with coefficients, not function values
             u_coeff_temp = u1_coeff - alpha * G1_coeff
             
@@ -146,6 +148,7 @@ class OpenLoopOptimizer:
             if k >= self.max_it:
                 store = False
                 print("Maximum iterations reached")
+                print(f" norm G = {utils.L2(sol1.x, G1)}")
                 break
         # Final result
         if store == True:

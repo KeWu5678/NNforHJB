@@ -32,15 +32,15 @@ dtype = [
 
 
 """=====================THE ODE======================"""
-beta = 3
+beta = 0.1
 
 def VDP(t, y, u):
     """Define the Boundary value problem with control parameter u"""
     return np.vstack([
         y[1],
         -y[0] + y[1] * (1 - y[0] ** 2) + u(t),
-        -y[3] - 2 * y[0],
-        2 * y[0] * y[1] * y[2] + y[0] ** 2 * y[3] + y[2] - y[3] - 2 * y[1]
+        - 2 * y[0] + y[3] * (2 * y[0] * y[1] + 1),
+        - 2 * y[1] - y[2] - y[3] * (1 -y[0] ** 2)
     ])
 
 def bc(ya, yb):
@@ -82,16 +82,16 @@ if __name__ == "__main__":
     grid = np.linspace(0, 3, 1000)
     guess = np.ones((4, grid.size))
     tol = 1e-5
-    max_it = 1000
+    max_it = 500
     
     # Create a 30x30 grid of initial conditions
     # Define the range for each dimension
-    x1_min, x1_max = 0, 3.0  # Range for first component
-    x2_min, x2_max = 0, 3.0  # Range for second component
+    x1_min, x1_max = -3.0, 3.0  # Range for first component
+    x2_min, x2_max = -3.0, 3.0  # Range for second component
     
     # Create 1D arrays for each dimension
-    x1_values = np.linspace(x1_min, x1_max, 30)
-    x2_values = np.linspace(x2_min, x2_max, 30)
+    x1_values = np.linspace(x1_min, x1_max, 50)
+    x2_values = np.linspace(x2_min, x2_max, 50)
     
     # Create a meshgrid
     X1, X2 = np.meshgrid(x1_values, x2_values)
@@ -128,10 +128,10 @@ if __name__ == "__main__":
             print(f"Failed to converge for ini = {ini}")
         
     # Use a filename that indicates grid sampling
-    output_file = "VDP_beta_3_grid_30x30.npy"
+    output_file = "VDP_beta_3_grid_40x40.npy"
     
     # Save failed initial conditions
-    failed_output_file = "VDP_beta_3_failed_ini.npy"
+    failed_output_file = "VDP_beta_3_failed_ini_40x40.npy"
     if failed_ini:
         failed_ini = np.array(failed_ini)
         print(f"Saving {len(failed_ini)} failed initial conditions to {failed_output_file}")

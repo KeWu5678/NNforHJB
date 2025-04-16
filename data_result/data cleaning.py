@@ -1,18 +1,55 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
-from scipy.interpolate import griddata
+from scipy.spatial.distance import cdist
 import os
 import pickle
 
-# Define the file paths for all VDP beta files
+# Load and combine datasets
+original_data = np.load('VDP_beta_3_grid_30x30.npy')
+print(f"Loaded original dataset with {len(original_data)} points")
 
-
-combined_data = np.load('VDP_beta_3_grid_30x30.npy')
+# Load fixed points data
+try:
+    fixed_points = np.load('VDP_beta_3_fixed_points_1.npy')
+    print(f"Loaded {len(fixed_points)} fixed points from VDP_beta_3_fixed_points_1.npy")
+    
+    # Create a combined dataset with original data and fixed points
+    dtype = original_data.dtype
+    combined_data = np.zeros(len(original_data) + len(fixed_points), dtype=dtype)
+    combined_data[:len(original_data)] = original_data
+    
+    # Add fixed points
+    added_count = 0
+    for i, fixed_point in enumerate(fixed_points):
+        # Check if this point exists in original data but has NaN values
+        found = False
+        for j, orig_point in enumerate(original_data):
+            if np.array_equal(fixed_point['x'], orig_point['x']):
+                if np.isnan(orig_point['v']) or np.isnan(orig_point['dv']).any():
+                    # Replace the NaN entry in original data
+                    combined_data[j] = fixed_point
+                found = True
+                break
+        
+        if not found:
+            # This is a new point, add it
+            combined_data[len(original_data) + added_count] = fixed_point
+            added_count += 1
+    
+    # Trim the array if needed
+    if added_count < len(fixed_points):
+        combined_data = combined_data[:len(original_data) + added_count]
+    
+    print(f"Added {added_count} new points to the dataset")
+    print(f"Combined dataset has {len(combined_data)} points")
+except FileNotFoundError:
+    print("VDP_beta_3_fixed_points_1.npy not found. Using only original data.")
+    combined_data = original_data
 
 # Filter out NaN values if any
 valid_data = combined_data[~np.isnan(combined_data['v'])]
-print(f"Valid data points: {valid_data.shape[0]}")
+print(f"Valid data points after filtering: {valid_data.shape[0]}")
 
 # Extract x0 (which has 2 components) and V
 x0_comp1 = valid_data['x'][:, 0]  # First component of x0
@@ -35,6 +72,39 @@ print(f"Min value: {np.min(v_values)}")
 print(f"Max value: {np.max(v_values)}")
 print(f"Mean value: {np.mean(v_values)}")
 print(f"Std deviation: {np.std(v_values)}")
+
+# Create a 3D scatter plot
+fig = plt.figure(figsize=(10, 8))
+ax = fig.add_subplot(111, projection='3d')
+
+# Create scatter plot
+scatter3d = ax.scatter(x0_comp1, x0_comp2, v_values, c=v_values, cmap='viridis', 
+                   s=50, alpha=0.8)
+
+# Add a color bar
+cbar = fig.colorbar(scatter3d, ax=ax, shrink=0.7)
+cbar.set_label('Value Function (V)')
+
+# Set labels and title
+ax.set_xlabel('x₀[0]')
+ax.set_ylabel('x₀[1]')
+ax.set_zlabel('Value Function (V)')
+ax.set_title('Combined VDP Data (β=3): Initial Conditions vs Value Function')
+
+# Adjust view angle
+ax.view_init(elev=30, azim=45)
+plt.tight_layout()
+
+# Save as regular image
+plt.savefig('VDP_3D_value_function.png', dpi=300)
+
+# Save the figure as a pickle for interactive use later
+pickle_file = 'VDP_3D_value_function.pickle'
+with open(pickle_file, 'wb') as f:
+    pickle.dump(fig, f)
+print(f"Saved interactive 3D plot to {pickle_file}")
+
+plt.show()
 
 # Create a 2D plot to visualize gradient vectors
 plt.figure(figsize=(12, 10))
@@ -78,11 +148,11 @@ cbar = plt.colorbar(scatter)
 cbar.set_label('Value Function (V)')
 plt.xlabel('x₀[0]')
 plt.ylabel('x₀[1]')
-plt.title('Value Function with Gradient Vectors (2D View)')
+plt.title('Value Function with Gradient Vectors (Combined Dataset)')
 plt.grid(True, alpha=0.3)
 
 # Save as high-resolution image
-plt.savefig('VDP_gradient_vectors_2D_grid.png', dpi=300, bbox_inches='tight')
+plt.savefig('VDP_gradient_vectors_combined_data.png', dpi=300, bbox_inches='tight')
 plt.show()
 
 ini = np.load("VDP_beta_3_failed_ini.npy")
