@@ -90,8 +90,8 @@ if __name__ == "__main__":
     x2_min, x2_max = -3.0, 3.0  # Range for second component
     
     # Create 1D arrays for each dimension
-    x1_values = np.linspace(x1_min, x1_max, 50)
-    x2_values = np.linspace(x2_min, x2_max, 50)
+    x1_values = np.linspace(x1_min, x1_max, 30)
+    x2_values = np.linspace(x2_min, x2_max, 30)
     
     # Create a meshgrid
     X1, X2 = np.meshgrid(x1_values, x2_values)

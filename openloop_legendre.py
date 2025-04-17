@@ -107,7 +107,7 @@ class OpenLoopOptimizer:
                     alpha = 0.01  # Default safe step size
             
             # Bound step size for stability
-            alpha = min(max(alpha, 1e-4), 1000.0)
+            alpha = min(max(alpha, 5e-3), 1000.0)
 
                 
             # Update coefficients - IMPORTANT: work with coefficients, not function values

@@ -6,46 +6,46 @@ import os
 import pickle
 
 # Load and combine datasets
-original_data = np.load('VDP_beta_3_grid_30x30.npy')
-print(f"Loaded original dataset with {len(original_data)} points")
+combined_data = np.load('VDP_beta_0.1_grid_30x30.npy')
+print(f"Loaded original dataset with {len(combined_data)} points")
 
 # Load fixed points data
-try:
-    fixed_points = np.load('VDP_beta_3_fixed_points_1.npy')
-    print(f"Loaded {len(fixed_points)} fixed points from VDP_beta_3_fixed_points_1.npy")
+# try:
+#     fixed_points = np.load('VDP_beta_3_fixed_points_1.npy')
+#     print(f"Loaded {len(fixed_points)} fixed points from VDP_beta_3_fixed_points_1.npy")
     
-    # Create a combined dataset with original data and fixed points
-    dtype = original_data.dtype
-    combined_data = np.zeros(len(original_data) + len(fixed_points), dtype=dtype)
-    combined_data[:len(original_data)] = original_data
+#     # Create a combined dataset with original data and fixed points
+#     dtype = original_data.dtype
+#     combined_data = np.zeros(len(original_data) + len(fixed_points), dtype=dtype)
+#     combined_data[:len(original_data)] = original_data
     
-    # Add fixed points
-    added_count = 0
-    for i, fixed_point in enumerate(fixed_points):
-        # Check if this point exists in original data but has NaN values
-        found = False
-        for j, orig_point in enumerate(original_data):
-            if np.array_equal(fixed_point['x'], orig_point['x']):
-                if np.isnan(orig_point['v']) or np.isnan(orig_point['dv']).any():
-                    # Replace the NaN entry in original data
-                    combined_data[j] = fixed_point
-                found = True
-                break
+#     # Add fixed points
+#     added_count = 0
+#     for i, fixed_point in enumerate(fixed_points):
+#         # Check if this point exists in original data but has NaN values
+#         found = False
+#         for j, orig_point in enumerate(original_data):
+#             if np.array_equal(fixed_point['x'], orig_point['x']):
+#                 if np.isnan(orig_point['v']) or np.isnan(orig_point['dv']).any():
+#                     # Replace the NaN entry in original data
+#                     combined_data[j] = fixed_point
+#                 found = True
+#                 break
         
-        if not found:
-            # This is a new point, add it
-            combined_data[len(original_data) + added_count] = fixed_point
-            added_count += 1
+#         if not found:
+#             # This is a new point, add it
+#             combined_data[len(original_data) + added_count] = fixed_point
+#             added_count += 1
     
-    # Trim the array if needed
-    if added_count < len(fixed_points):
-        combined_data = combined_data[:len(original_data) + added_count]
+#     # Trim the array if needed
+#     if added_count < len(fixed_points):
+#         combined_data = combined_data[:len(original_data) + added_count]
     
-    print(f"Added {added_count} new points to the dataset")
-    print(f"Combined dataset has {len(combined_data)} points")
-except FileNotFoundError:
-    print("VDP_beta_3_fixed_points_1.npy not found. Using only original data.")
-    combined_data = original_data
+#     print(f"Added {added_count} new points to the dataset")
+#     print(f"Combined dataset has {len(combined_data)} points")
+# except FileNotFoundError:
+#     print("VDP_beta_3_fixed_points_1.npy not found. Using only original data.")
+#     combined_data = original_data
 
 # Filter out NaN values if any
 valid_data = combined_data[~np.isnan(combined_data['v'])]
