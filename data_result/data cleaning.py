@@ -89,7 +89,7 @@ cbar.set_label('Value Function (V)')
 ax.set_xlabel('x₀[0]')
 ax.set_ylabel('x₀[1]')
 ax.set_zlabel('Value Function (V)')
-ax.set_title('Combined VDP Data (β=3): Initial Conditions vs Value Function')
+ax.set_title('Combined VDP Data (β=0.1): Initial Conditions vs Value Function')
 
 # Adjust view angle
 ax.view_init(elev=30, azim=45)
@@ -148,15 +148,40 @@ cbar = plt.colorbar(scatter)
 cbar.set_label('Value Function (V)')
 plt.xlabel('x₀[0]')
 plt.ylabel('x₀[1]')
-plt.title('Value Function with Gradient Vectors (Combined Dataset)')
+plt.title('Value Function with Gradient Vectors')
 plt.grid(True, alpha=0.3)
 
 # Save as high-resolution image
 plt.savefig('VDP_gradient_vectors_combined_data.png', dpi=300, bbox_inches='tight')
 plt.show()
 
-ini = np.load("VDP_beta_3_failed_ini.npy")
+ini = np.load("VDP_beta_0.1_failed_ini_30x30.npy")
 print(ini)
+
+# Plot failed initial conditions
+plt.figure(figsize=(10, 8))
+# Check if ini is 1D or 2D
+if len(ini.shape) == 1:
+    # If 1D, reshape to ensure it's treated as a collection of points
+    ini_points = ini.reshape(-1, 2)
+else:
+    ini_points = ini
+
+# Plot the failed initial condition points
+plt.scatter(ini_points[:, 0], ini_points[:, 1], color='red', marker='x', s=100, label='Failed Initial Conditions')
+
+# Add the existing valid data points for comparison
+plt.scatter(x0_comp1, x0_comp2, c=v_values, cmap='viridis', 
+           s=30, alpha=0.3, label='Valid Data Points')
+
+plt.colorbar(label='Value Function (V)')
+plt.xlabel('x₀[0]')
+plt.ylabel('x₀[1]')
+plt.title('Failed Initial Conditions Compared to Valid Data')
+plt.grid(True, alpha=0.3)
+plt.legend()
+plt.savefig('VDP_failed_initial_conditions.png', dpi=300, bbox_inches='tight')
+plt.show()
 
 # # Previous 3D plot code is commented out
 # # Create a 3D scatter plot

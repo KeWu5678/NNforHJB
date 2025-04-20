@@ -1,0 +1,59 @@
+Training run at 2025-04-19 07:05:16
+Hyperparameters: activation=relu, power=2, gamma=0.01, loss_weights=(1.0, 1.0), alpha=0.01
+
+Iteration summary:
+Iteration 0: 2 neurons
+  Train loss: [ 6.61167   22.66026    2.5226035]
+  Test loss: [ 8.91235   27.721663   2.5334523]
+  Test metrics: [8.91235]
+
+Iteration 1: 5 neurons
+  Train loss: [2.3299778  4.2293715  0.43697268]
+  Test loss: [2.2685966  4.632677   0.38667807]
+  Test metrics: [2.2685966]
+
+Iteration 2: 13 neurons
+  Train loss: [2.3462818 2.964286  0.2608136]
+  Test loss: [2.255173   2.687181   0.29693106]
+  Test metrics: [2.2551732]
+
+Iteration 3: 35 neurons
+  Train loss: [1.4421531  1.5847803  0.15829445]
+  Test loss: [1.2961385  1.669616   0.14036408]
+  Test metrics: [1.2961386]
+
+Iteration 4: 77 neurons
+  Train loss: [1.1567638  0.95477974 0.08820346]
+  Test loss: [0.9663196  0.9330515  0.07775543]
+  Test metrics: [0.9663198]
+
+Iteration 5: 109 neurons
+  Train loss: [1.088786   0.8445002  0.07462942]
+  Test loss: [1.158004   0.854867   0.06810435]
+  Test metrics: [1.158004]
+
+Iteration 6: 133 neurons
+  Train loss: [1.0114844  0.9015072  0.07624074]
+  Test loss: [1.1391246  0.9332103  0.07983557]
+  Test metrics: [1.1391246]
+
+Iteration 7: 180 neurons
+  Train loss: [1.1006123  0.8513604  0.07322749]
+  Test loss: [0.82770157 0.85655695 0.05425022]
+  Test metrics: [0.82770157]
+
+Iteration 8: 222 neurons
+  Train loss: [1.0684152 0.8628269 0.0725185]
+  Test loss: [0.9742714  0.89825344 0.07653424]
+  Test metrics: [0.9742714]
+
+Iteration 9: 260 neurons
+  Train loss: [1.042971   0.857184   0.06291931]
+  Test loss: [1.1034858  0.92501354 0.05927723]
+  Test metrics: [1.1034858]
+
+Iteration 10: 307 neurons
+  Train loss: [1.0932461  0.8314848  0.05744797]
+  Test loss: [1.0901134  0.7715355  0.06948349]
+  Test metrics: [1.0901134]
+

@@ -26,8 +26,11 @@ class HJBDataset(Dataset):
 
 
 class ShallowNetwork(nn.Module):
-    """Shallow neural network with a single hidden layer and customized initialization"""
-    def __init__(self, input_dim, n_neurons, activation='tanh', p=1.0, inner_weights=None, inner_bias=None):
+    """
+    Shallow neural network with a single hidden layer and inner weights and biases given by the user
+    The output layer is initialized with Glorot (Xavier) normal
+    """
+    def __init__(self, input_dim, n_neurons, activation='relu', p=1.0, inner_weights=None, inner_bias=None):
         """
         Args:
             input_dim: Dimension of input features
@@ -117,15 +120,33 @@ class ShallowNetworkModel:
     
     def gradient(self, x):
         """Compute gradients of the network output with respect to the input"""
+        # Handle case where network has zero neurons
+        if self.net.n_neurons == 0:
+            return torch.zeros(x.shape[0], x.shape[1], device=self.device)
+            
         x = x.clone().detach().requires_grad_(True)
         y = self.net(x)
         
         gradients = []
         for i in range(y.shape[0]):
             self.net.zero_grad()
-            y[i].backward(retain_graph=True)
-            gradients.append(x.grad[i].clone().detach())
-            x.grad.zero_()
+            
+            # Check if y[i] has a grad_fn (gradient function) before calling backward
+            if y[i].grad_fn is not None:
+                y[i].backward(retain_graph=True)
+                
+                # Check if x.grad exists (could be None if no gradient was computed)
+                if x.grad is not None:
+                    gradients.append(x.grad[i].clone().detach())
+                else:
+                    gradients.append(torch.zeros_like(x[i]))
+                
+                # Zero gradients for next iteration
+                if x.grad is not None:
+                    x.grad.zero_()
+            else:
+                # If no gradient function, append zeros
+                gradients.append(torch.zeros_like(x[i]))
         
         return torch.stack(gradients)
         
@@ -188,12 +209,12 @@ class ShallowNetworkModel:
                 epsilon = 1e-10  # Small value to prevent division by zero
                 
                 # Relative value loss: divide by squared target values
-                squared_v_batch = v_batch**2 + epsilon
-                value_loss = torch.mean((v_pred - v_batch)**2 / squared_v_batch)
+                # squared_v_batch = v_batch**2 + epsilon
+                value_loss = torch.mean((v_pred - v_batch)**2)
                 
                 # Gradient loss (MSE for each component)
-                squared_dv_batch = torch.sum(dv_batch**2, dim=1, keepdim=True) + epsilon
-                grad_loss = torch.mean((dv_pred - dv_batch)**2 / squared_dv_batch)
+                # squared_dv_batch = torch.sum(dv_batch**2, dim=1, keepdim=True) + epsilon
+                grad_loss = torch.mean((dv_pred - dv_batch)**2)
                 
                 # Total loss (equal weighting for simplicity)
                 total_loss = value_loss + grad_loss
@@ -350,7 +371,7 @@ def network(data, power, regularization = None, inner_weights=None, inner_bias=N
 
 
 if __name__ == "__main__":
-    data = np.load("data_result/VDP_beta_3_grid_30x30.npy")
+    data = np.load("data_result/VDP_beta_0.1_grid_30x30.npy")
     weights = np.random.randn(1000, 2)
     bias = np.random.randn(1000)
     regularization = ('phi', 0.01, 0.5)
