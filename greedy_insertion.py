@@ -110,13 +110,16 @@ def insertion(data, model, N, alpha):
         #print(f"np.norm(dV_train - dV_pred): {np.linalg.norm(dV_train - get_dV_pred(X_train))}")
         #print(f"gradient(z): {gradient(z)}")
         res = minimize(lambda x: -np.abs(gradient(x)), x0=z)
-        #print(f"res.fun: {res.fun}")
+        # print(f"res.fun: {res.fun}")
+        # print(f"res.x: {res.x}")
+        # print(f"z: {z}")
         if res.fun < - alpha:
             result.append(res.x)
+            # print(f"res.fun: {res.fun}")
     
     # Transfer the dimension
     result_z_raw = np.array(result)
-    result_z_removed = remove_duplicates(result_z_raw, tolerance=1e-5)
+    result_z_removed = remove_duplicates(result_z_raw, tolerance=1e-3)
     result_z_final = result_z_removed.T
 
     #print(f"result_z: {result_z_removed}")

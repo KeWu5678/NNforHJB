@@ -170,3 +170,4 @@ def fit_legendre(x_data, y_data, n, domain=(0, 3), report_error=False):
     return coeffs
 
 
+

@@ -1,0 +1,54 @@
+Training run at 2025-04-21 04:37:29
+Hyperparameters: activation=relu, power=2, gamma=5.0, loss_weights=(1.0, 1.0), alpha=1e-05
+
+Iteration summary:
+Iteration 0: 2 neurons
+  train loss: [ 4.807021  20.854288   0.4473143] sum: 2.61e+01
+  test loss: [ 4.5707498  19.257755    0.40117824] sum: 2.42e+01
+  test metrics: [4.5707498] sum: 4.57e+00
+
+Iteration 1: 6 neurons
+  train loss: [2.5072885  3.7176044  0.34159732] sum: 6.57e+00
+  test loss: [2.2299755  3.4298556  0.23933229] sum: 5.90e+00
+  test metrics: [2.2299752] sum: 2.23e+00
+
+Iteration 2: 13 neurons
+  train loss: [1.6779972  1.969055   0.32625574] sum: 3.97e+00
+  test loss: [1.70434    1.7110969  0.26558834] sum: 3.68e+00
+  test metrics: [1.7043397] sum: 1.70e+00
+
+Iteration 3: 32 neurons
+  train loss: [1.3087772  1.421897   0.18849333] sum: 2.92e+00
+  test loss: [1.3677032  1.4696134  0.14750202] sum: 2.98e+00
+  test metrics: [1.3677031] sum: 1.37e+00
+
+Iteration 4: 54 neurons
+  train loss: [1.1195605  1.0552723  0.08095398] sum: 2.26e+00
+  test loss: [1.117754   1.0898958  0.08624502] sum: 2.29e+00
+  test metrics: [1.117754] sum: 1.12e+00
+
+Iteration 5: 86 neurons
+  train loss: [0.96430993 0.8155774  0.06290302] sum: 1.84e+00
+  test loss: [0.9593364  1.0145094  0.07252423] sum: 2.05e+00
+  test metrics: [0.95933634] sum: 9.59e-01
+
+Iteration 6: 115 neurons
+  train loss: [0.9662373  0.8107399  0.05536903] sum: 1.83e+00
+  test loss: [0.969447   0.99659824 0.06486861] sum: 2.03e+00
+  test metrics: [0.9694469] sum: 9.69e-01
+
+Iteration 7: 140 neurons
+  train loss: [0.96585053 0.81026506 0.05396446] sum: 1.83e+00
+  test loss: [0.96660376 0.999683   0.06101337] sum: 2.03e+00
+  test metrics: [0.9666039] sum: 9.67e-01
+
+Iteration 8: 163 neurons
+  train loss: [0.95929   0.7885957 0.0528925] sum: 1.80e+00
+  test loss: [0.97281086 0.9767339  0.0588988 ] sum: 2.01e+00
+  test metrics: [0.97281086] sum: 9.73e-01
+
+Iteration 9: 179 neurons
+  train loss: [0.93932337 0.78585446 0.05406775] sum: 1.78e+00
+  test loss: [0.9495153  0.96765846 0.06012424] sum: 1.98e+00
+  test metrics: [0.9495152] sum: 9.50e-01
+

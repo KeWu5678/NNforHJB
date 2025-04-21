@@ -147,11 +147,11 @@ if __name__ == "__main__":
     path = 'data_result/raw_data/VDP_beta_0.1_grid_30x30.npy'# Initialize the weights
     dataset = np.load(path)
     power = 2
-    gamma = 0.01
+    gamma = 5.0
     M = 50 # number greedy insertion selected
     alpha = 1e-5
     regularization = ('phi', gamma, alpha)
-    activation = "tanh"
+    activation = "relu"
     num_iterations = 10
     loss_weights = (1.0, 1.0)
     # Data inspection
@@ -167,6 +167,12 @@ if __name__ == "__main__":
         'v': np.array([item[2] for item in dataset])
     }
     
+    # Randomly permute the data
+    num_samples = len(data_dict['x'])
+    permutation = np.random.permutation(num_samples)
+    data_dict['x'] = data_dict['x'][permutation]
+    data_dict['dv'] = data_dict['dv'][permutation]
+    data_dict['v'] = data_dict['v'][permutation]
     
     # Initialize the model with zero weights
     init_weights = np.random.randn(2, 2)
@@ -227,7 +233,7 @@ if __name__ == "__main__":
         bias = np.concatenate((bias, bias_temp), axis=0)
         
         # Use a new random seed for each iteration to get different train/test splits
-        np.random.seed(42 + i)
+        # np.random.seed(42 + i)
         model, weight, bias = network(data_dict, activation, power, regularization, loss_weights = loss_weights, inner_weights = weight, inner_bias = bias)
         print(f"After concatenation - weight shape: {weight.shape}, bias shape: {bias.shape}")
         
@@ -321,10 +327,32 @@ if __name__ == "__main__":
         f.write(f"Hyperparameters: activation={activation}, power={power}, gamma={gamma}, loss_weights={loss_weights}, alpha={alpha}\n\n")
         f.write("Iteration summary:\n")
         for i, count in enumerate(weights_history['neuron_count']):
+            train_loss = weights_history['train_loss'][i]
+            test_loss = weights_history['test_loss'][i]
+            test_metrics = weights_history['test_metrics'][i]
+            
             f.write(f"Iteration {i}: {count} neurons\n")
-            f.write(f"  Train loss: {weights_history['train_loss'][i]}\n")
-            f.write(f"  Test loss: {weights_history['test_loss'][i]}\n")
-            f.write(f"  Test metrics: {weights_history['test_metrics'][i]}\n\n")
+            
+            # Format train loss similar to DeepXDE's display, showing individual values and their sum
+            if isinstance(train_loss, (list, np.ndarray)):
+                f.write(f"  train loss: {train_loss}")
+                f.write(f" sum: {np.sum(train_loss):.2e}\n")
+            else:
+                f.write(f"  train loss: {train_loss}\n")
+                
+            # Format test loss
+            if isinstance(test_loss, (list, np.ndarray)):
+                f.write(f"  test loss: {test_loss}")
+                f.write(f" sum: {np.sum(test_loss):.2e}\n")
+            else:
+                f.write(f"  test loss: {test_loss}\n")
+                
+            # Format test metrics
+            if isinstance(test_metrics, (list, np.ndarray)):
+                f.write(f"  test metrics: {test_metrics}")
+                f.write(f" sum: {np.sum(test_metrics):.2e}\n\n")
+            else:
+                f.write(f"  test metrics: {test_metrics}\n\n")
 
 
     

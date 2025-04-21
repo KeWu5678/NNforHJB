@@ -36,12 +36,11 @@ def network(data, activation,  power, regularization, loss_weights = (1.0, 1.0),
     # Get the raw data
     ob_x, ob_v, ob_dv = data["x"], data["v"], data["dv"]
     
-    # Split data into training and validation sets
+    # Split data into training and validation sets - no need for permutation as indices are already permuted
     num_samples = len(ob_x)
-    indices = np.random.permutation(num_samples)
     split_idx = int(num_samples * training_percentage)
-    train_indices = indices[:split_idx]
-    valid_indices = indices[split_idx:]
+    train_indices = np.arange(split_idx)
+    valid_indices = np.arange(split_idx, num_samples)
     
     # Create training and validation datasets
     train_x = ob_x[train_indices].astype(np.float32)
@@ -76,11 +75,11 @@ def network(data, activation,  power, regularization, loss_weights = (1.0, 1.0),
 
     geom = dde.geometry.Rectangle([-3, -3], [3, 3])
 
-    def aux_function(x):
+    def gradient_function(x):
         """Return the auxiliary variables (dV/dx values) for the given points x."""
         # Create KDTree for efficient lookup using the full dataset
-        if not hasattr(aux_function, 'kdtree'):
-            aux_function.kdtree = KDTree(ob_x)
+        if not hasattr(gradient_function, 'kdtree'):
+            gradient_function.kdtree = KDTree(ob_x)
         
         # Handle PyTorch tensors by detaching and converting to numpy
         if hasattr(x, 'detach') and callable(getattr(x, 'detach')):
@@ -89,7 +88,7 @@ def network(data, activation,  power, regularization, loss_weights = (1.0, 1.0),
             x_np = np.array(x)
         
         # Find indices of closest points
-        distances, indices = aux_function.kdtree.query(x_np, k=1)
+        distances, indices = gradient_function.kdtree.query(x_np, k=1)
         # Convert to float32 to match model weights
         return ob_dv[indices].astype(np.float32)
 
@@ -119,7 +118,7 @@ def network(data, activation,  power, regularization, loss_weights = (1.0, 1.0),
         num_domain=0,
         num_boundary=0,
         anchors=train_x,  # Use only training data as anchors
-        auxiliary_var_function=aux_function,
+        auxiliary_var_function=gradient_function,
         solution=value_function,
         num_test=len(valid_x)  # Generate test points equal to validation set size
     )
@@ -163,7 +162,7 @@ def network(data, activation,  power, regularization, loss_weights = (1.0, 1.0),
     
     # Train the model
     # losshistory and train_state are saved as model.losshistory and model.train_state
-    model.train(iterations=20000, display_every=1000, model_save_path=model_save_path)
+    model.train(iterations=50000, display_every=1000, model_save_path=model_save_path)
     
     # All training and testing errors are available in model.losshistory
     # - model.losshistory.loss_train: training loss
@@ -175,7 +174,7 @@ def network(data, activation,  power, regularization, loss_weights = (1.0, 1.0),
     return model, weight.numpy(), bias.numpy()
     
 if __name__ == "__main__":
-    data = np.load("data_result/VDP_beta_0.1_grid_30x30.npy")
+    data = np.load("data_result/raw_data/VDP_beta_0.1_grid_30x30.npy")
     weights = np.random.randn(300, 2)
     bias = np.random.randn(300)
     regularization = ('phi', 0.01, 0.01)
