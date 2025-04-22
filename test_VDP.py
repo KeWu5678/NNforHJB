@@ -147,13 +147,13 @@ if __name__ == "__main__":
     path = 'data_result/raw_data/VDP_beta_0.1_grid_30x30.npy'# Initialize the weights
     dataset = np.load(path)
     power = 2
-    gamma = 0.01
+    gamma = 5.0
     M = 50 # number greedy insertion selected
     alpha = 1e-5
     regularization = ('phi', gamma, alpha)
     activation = "relu"
     num_iterations = 10
-    loss_weights = (1.0, 0.0)
+    loss_weights = (1.0, 1.0)
     # Data inspection
     print(f"Loaded dataset from {path}")
     print(f"Dataset shape: {dataset.shape}")
