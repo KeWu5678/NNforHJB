@@ -147,13 +147,13 @@ if __name__ == "__main__":
     path = 'data_result/raw_data/VDP_beta_0.1_grid_30x30.npy'# Initialize the weights
     dataset = np.load(path)
     power = 2
-    gamma = 5.0
+    gamma = 0.01
     M = 50 # number greedy insertion selected
     alpha = 1e-5
     regularization = ('phi', gamma, alpha)
     activation = "relu"
     num_iterations = 10
-    loss_weights = (1.0, 1.0)
+    loss_weights = (1.0, 0.0)
     # Data inspection
     print(f"Loaded dataset from {path}")
     print(f"Dataset shape: {dataset.shape}")
@@ -333,24 +333,21 @@ if __name__ == "__main__":
             
             f.write(f"Iteration {i}: {count} neurons\n")
             
-            # Format train loss similar to DeepXDE's display, showing individual values and their sum
+            # Write train loss without sum
             if isinstance(train_loss, (list, np.ndarray)):
-                f.write(f"  train loss: {train_loss}")
-                f.write(f" sum: {np.sum(train_loss):.2e}\n")
+                f.write(f"  train loss: {train_loss}\n")
             else:
                 f.write(f"  train loss: {train_loss}\n")
                 
-            # Format test loss
+            # Write test loss without sum
             if isinstance(test_loss, (list, np.ndarray)):
-                f.write(f"  test loss: {test_loss}")
-                f.write(f" sum: {np.sum(test_loss):.2e}\n")
+                f.write(f"  test loss: {test_loss}\n")
             else:
                 f.write(f"  test loss: {test_loss}\n")
                 
-            # Format test metrics
+            # Write test metrics without sum
             if isinstance(test_metrics, (list, np.ndarray)):
-                f.write(f"  test metrics: {test_metrics}")
-                f.write(f" sum: {np.sum(test_metrics):.2e}\n\n")
+                f.write(f"  test metrics: {test_metrics}\n\n")
             else:
                 f.write(f"  test metrics: {test_metrics}\n\n")
 

@@ -18,6 +18,8 @@ print(f"Using backend: {dde.backend.backend_name}")
 
 import numpy as np
 from scipy.spatial import KDTree
+import torch
+from utils import h1_error
 
 
 def network(data, activation,  power, regularization, loss_weights = (1.0, 1.0), inner_weights = None, inner_bias = None):
@@ -118,7 +120,7 @@ def network(data, activation,  power, regularization, loss_weights = (1.0, 1.0),
         num_domain=0,
         num_boundary=0,
         anchors=train_x,  # Use only training data as anchors
-        auxiliary_var_function=gradient_function,
+        auxiliary_var_function=gradient_function, # here is the "ex" in the PDE
         solution=value_function,
         num_test=len(valid_x)  # Generate test points equal to validation set size
     )
@@ -150,9 +152,11 @@ def network(data, activation,  power, regularization, loss_weights = (1.0, 1.0),
         )
     model = dde.Model(data, net)
     
-    # Add "mean squared error" metric to track the value-function-only MSE
-    # in addition to the default train/test loss which includes PDE constraints
-    model.compile("adam", lr=0.005, loss="mse", metrics=["mean squared error"], 
+    # Define the H1 error metric using a lambda to pass the required parameters
+    h1_metric = lambda y_true, y_pred: h1_error(y_true, y_pred, data.test_x, model)
+    
+    # Add both "mean squared error" and our custom H1 error metric
+    model.compile("adam", lr=0.005, loss="mse", metrics=["mean squared error", h1_metric], 
                  loss_weights=[loss_weights[0], loss_weights[1], loss_weights[1]])  # Value matching gets higher weight
 
     current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -162,7 +166,7 @@ def network(data, activation,  power, regularization, loss_weights = (1.0, 1.0),
     
     # Train the model
     # losshistory and train_state are saved as model.losshistory and model.train_state
-    model.train(iterations=50000, display_every=1000, model_save_path=model_save_path)
+    model.train(iterations=20000, display_every=1000, model_save_path=model_save_path)
     
     # All training and testing errors are available in model.losshistory
     # - model.losshistory.loss_train: training loss
@@ -178,6 +182,45 @@ if __name__ == "__main__":
     weights = np.random.randn(300, 2)
     bias = np.random.randn(300)
     regularization = ('phi', 0.01, 0.01)
-    model, weight, bias = network(data, "relu", 2.0, regularization, loss_weights = (1.0, 0.0), inner_weights=weights, inner_bias=bias)
+    model, weight, bias = network(data, "relu", 2.0, regularization, loss_weights = (1.0, 1.0), inner_weights=weights, inner_bias=bias)
+
+# Define a custom H1 error metric for DeepXDE
+def custom_h1_error(y_true, y_pred, x, model):
+    """
+    Calculate H1 error (L2 error of values + L2 error of gradients)
+    
+    Args:
+        y_true: True values
+        y_pred: Predicted values
+        x: Input points
+        model: The DeepXDE model
+    """
+    # L2 error of values - already computed as MSE by default
+    value_error = dde.metrics.mean_squared_error(y_true, y_pred)
+    
+    # Get gradients from auxiliary variables (true gradients)
+    grad_true = model.data.test_aux_vars
+    
+    # Calculate predicted gradients using autodiff
+    inputs = dde.backend.as_tensor(x)
+    inputs.requires_grad_()
+    outputs = model.net(inputs)
+    
+    # Calculate gradient with respect to inputs
+    grad_pred = []
+    for i in range(2):  # For 2D problem
+        grad_i = dde.grad.jacobian(outputs, inputs, i=0, j=i)
+        grad_pred.append(grad_i)
+    
+    grad_pred = torch.cat(grad_pred, dim=1)
+    
+    # Calculate L2 error of gradients
+    gradient_error = torch.mean((grad_pred - torch.tensor(grad_true))**2)
+    
+    # H1 error = L2 error of values + L2 error of gradients
+    h1_error = value_error + gradient_error
+    
+    # Round the result to 8 digits
+    return round(h1_error.item(), 8)
 
 
