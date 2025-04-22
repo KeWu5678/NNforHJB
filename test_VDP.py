@@ -153,7 +153,7 @@ if __name__ == "__main__":
     regularization = ('phi', gamma, alpha)
     activation = "relu"
     num_iterations = 10
-    loss_weights = (1.0, 1.0)
+    loss_weights = (1.0, 0.0)
     # Data inspection
     print(f"Loaded dataset from {path}")
     print(f"Dataset shape: {dataset.shape}")
