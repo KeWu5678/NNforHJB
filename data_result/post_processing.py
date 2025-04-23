@@ -217,10 +217,9 @@ if weights_20_iter7 is not None and weights_21_iter8 is not None and weights_22_
     axes[2].set_title(f'Weight Space in Polar Coordinates\nTraining 22 (γ={gamma_22})\nNeurons: {neurons_22_iter7}', fontsize=12)
     axes[2].grid(True, alpha=0.5)
     
-    # Add a main title
-    plt.suptitle('Analysis of Weights in Polar Coordinates at Optimal Iteration', fontsize=16)
-    plt.tight_layout()
-    plt.subplots_adjust(top=0.85)
+    # Add a main title with more space between it and the subplots
+    plt.subplots_adjust(top=0.78, wspace=0.3)
+    plt.suptitle('Analysis of Weights in Polar Coordinates for Different Regularization Values', fontsize=16)
     
     # Save the figure
     plt.savefig('data_result/plot/weights_polar_analysis.png', dpi=300)
