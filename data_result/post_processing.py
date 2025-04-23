@@ -194,7 +194,7 @@ if weights_20_iter7 is not None and weights_21_iter8 is not None and weights_22_
     
     # Plot in polar coordinates
     axes[0].scatter(angles_20, xy_norms_20, color='blue', alpha=0.8, s=60)
-    axes[0].set_title(f'Weight Space in Polar Coordinates\nTraining 20 (γ={gamma_20})\nNeurons: {neurons_20_iter7}', fontsize=12)
+    axes[0].set_title(f'Weight Space at Optimal Iteration\nTraining 20 (γ={gamma_20})\nNeurons: {neurons_20_iter7}', fontsize=12)
     axes[0].grid(True, alpha=0.5)
     
     # 2. Polar plot for Training 21
@@ -204,7 +204,7 @@ if weights_20_iter7 is not None and weights_21_iter8 is not None and weights_22_
     
     # Plot in polar coordinates
     axes[1].scatter(angles_21, xy_norms_21, color='red', alpha=0.8, s=60)
-    axes[1].set_title(f'Weight Space in Polar Coordinates\nTraining 21 (γ={gamma_21})\nNeurons: {neurons_21_iter8}', fontsize=12)
+    axes[1].set_title(f'Weight Space at Optimal Iteration\nTraining 21 (γ={gamma_21})\nNeurons: {neurons_21_iter8}', fontsize=12)
     axes[1].grid(True, alpha=0.5)
     
     # 3. Polar plot for Training 22
@@ -214,12 +214,11 @@ if weights_20_iter7 is not None and weights_21_iter8 is not None and weights_22_
     
     # Plot in polar coordinates
     axes[2].scatter(angles_22, xy_norms_22, color='green', alpha=0.8, s=60)
-    axes[2].set_title(f'Weight Space in Polar Coordinates\nTraining 22 (γ={gamma_22})\nNeurons: {neurons_22_iter7}', fontsize=12)
+    axes[2].set_title(f'Weight Space at Optimal Iteration\nTraining 22 (γ={gamma_22})\nNeurons: {neurons_22_iter7}', fontsize=12)
     axes[2].grid(True, alpha=0.5)
     
-    # Add a main title with more space between it and the subplots
-    plt.subplots_adjust(top=0.78, wspace=0.3)
-    plt.suptitle('Analysis of Weights in Polar Coordinates for Different Regularization Values', fontsize=16)
+    # Adjust spacing without main title
+    plt.subplots_adjust(wspace=0.3)
     
     # Save the figure
     plt.savefig('data_result/plot/weights_polar_analysis.png', dpi=300)
