@@ -179,9 +179,9 @@ def network(data, activation,  power, regularization, loss_weights = (1.0, 1.0),
     
 if __name__ == "__main__":
     data = np.load("data_result/raw_data/VDP_beta_0.1_grid_30x30.npy")
-    weights = np.random.randn(300, 2)
-    bias = np.random.randn(300)
-    regularization = ('phi', 0.01, 0.01)
+    weights = np.random.randn(73, 2)
+    bias = np.random.randn(73)
+    regularization = ('l1', 0.0) #('phi', 0.01, 0.01)
     model, weight, bias = network(data, "relu", 2.0, regularization, loss_weights = (1.0, 1.0), inner_weights=weights, inner_bias=bias)
 
 

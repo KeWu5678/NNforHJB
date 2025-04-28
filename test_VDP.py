@@ -147,10 +147,10 @@ if __name__ == "__main__":
     path = 'data_result/raw_data/VDP_beta_0.1_grid_30x30.npy'# Initialize the weights
     dataset = np.load(path)
     power = 2
-    gamma = 0.0
+    gamma = 0.01
     M = 50 # number greedy insertion selected
-    alpha = 1e-5
-    regularization = ('l1', alpha) #('phi', gamma, alpha)
+    alpha = 1e-05
+    regularization = ('phi', gamma, alpha) #('l1', alpha)
     activation = "relu"
     num_iterations = 20
     loss_weights = (1.0, 0.0)

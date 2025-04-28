@@ -50,48 +50,63 @@ def extract_data(file_path):
 neurons_20, l2_errors_20, h1_errors_20, gamma_20, _ = extract_data("data_result/weights/weights_metadata_20.txt")
 neurons_21, l2_errors_21, h1_errors_21, gamma_21, _ = extract_data("data_result/weights/weights_metadata_21.txt")
 neurons_22, l2_errors_22, h1_errors_22, gamma_22, _ = extract_data("data_result/weights/weights_metadata_22.txt")
+neurons_23, l2_errors_23, h1_errors_23, gamma_23, _ = extract_data("data_result/weights/weights_metadata_23.txt")
 
 # Read data for comparison between fitting with and without gradient
 neurons_14, l2_errors_14, h1_errors_14, gamma_14, using_gradient_14 = extract_data("data_result/weights/weights_metadata_14.txt")
 neurons_18, l2_errors_18, h1_errors_18, gamma_18, using_gradient_18 = extract_data("data_result/weights/weights_metadata_18.txt")
 
-# First plot: Comparison between gamma values
+# =============================================================================
+# PLOT 1: Comparison between fitting with and without gradient (no penalty)
+# Shows how gradient fitting affects L2 and H1 errors when no penalty is used
+# =============================================================================
+
+# NEW PLOT: COMPARING WEIGHTS_METADATA_23 AND WEIGHTS_METADATA_24 (NO PENALTY)
+# Read data for comparison between fitting with and without gradient (no penalty)
+neurons_23, l2_errors_23, h1_errors_23, gamma_23, _ = extract_data("data_result/weights/weights_metadata_23.txt")
+neurons_24, l2_errors_24, h1_errors_24, gamma_24, _ = extract_data("data_result/weights/weights_metadata_24.txt")
+
 # Create figure with two subplots
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
 
-# Plot L2 errors - removed the 'o' marker
-ax1.plot(neurons_20, l2_errors_20, 'b-', label=f'γ={gamma_20}')
-ax1.plot(neurons_21, l2_errors_21, 'r-', label=f'γ={gamma_21}')
-ax1.plot(neurons_22, l2_errors_22, 'g-', label=f'γ={gamma_22}')
+# Plot L2 errors
+ax1.plot(neurons_23, l2_errors_23, 'g-', label='With Gradient (1.0, 1.0)')
+ax1.plot(neurons_24, l2_errors_24, 'm-', label='Without Gradient (1.0, 0.0)')
 ax1.set_xlabel('Number of Neurons')
 ax1.set_ylabel('L2 Error')
 ax1.set_title('L2 Error vs. Number of Neurons')
 ax1.legend()
 ax1.grid(True)
-ax1.set_xlim(0, 400)  # Set x-axis limits from 0 to 400
+ax1.set_xlim(0, 400)  # Set x-axis limits based on data
 
-# Plot H1 errors - removed the 'o' marker
-ax2.plot(neurons_20, h1_errors_20, 'b-', label=f'γ={gamma_20}')
-ax2.plot(neurons_21, h1_errors_21, 'r-', label=f'γ={gamma_21}')
-ax2.plot(neurons_22, h1_errors_22, 'g-', label=f'γ={gamma_22}')
+# Plot H1 errors
+ax2.plot(neurons_23, h1_errors_23, 'g-', label='With Gradient (1.0, 1.0)')
+ax2.plot(neurons_24, h1_errors_24, 'm-', label='Without Gradient (1.0, 0.0)')
 ax2.set_xlabel('Number of Neurons')
 ax2.set_ylabel('H1 Error')
 ax2.set_title('H1 Error vs. Number of Neurons')
 ax2.legend()
 ax2.grid(True)
-ax2.set_xlim(0, 400)  # Set x-axis limits from 0 to 400
+ax2.set_xlim(0, 400)  # Set x-axis limits based on data
 
 # Set log scale for y-axis on both plots
 ax1.set_yscale('log')
 ax2.set_yscale('log')
 
 # Add a main title
-plt.suptitle('Fitting with gradient: sparcity inducing effect', fontsize=14)
+plt.suptitle('Testing Error: Fitting With vs. Without Gradient (no penalty)', fontsize=14)
 plt.tight_layout()
 
 # Save the figure
-plt.savefig('data_result/plot/Fitting with gradient: sparcity inducing effect.png', dpi=300)
-print(f"Plot saved to data_result/plot/error_vs_neurons_gamma_comparison.png")
+plt.savefig('data_result/plot/Fitting With vs. Without Gradient_no_penalty.png', dpi=300)
+print(f"Plot saved to data_result/plot/Fitting With vs. Without Gradient_no_penalty.png")
+
+plt.show()
+
+# =============================================================================
+# PLOT 2: Comparison between fitting with and without gradient for nonconvex penalty (γ=0.01)
+# Shows how gradient fitting affects L2 and H1 errors when using nonconvex penalty
+# =============================================================================
 
 # Second plot: Comparison between fitting with and without gradient
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
@@ -121,15 +136,114 @@ ax1.set_yscale('log')
 ax2.set_yscale('log')
 
 # Add a main title
-plt.suptitle('Error Metrics: Fitting With vs. Without Gradient (γ=0.01)', fontsize=14)
+plt.suptitle('Testing Error: Fitting With vs. Without Gradient for nonconvex penalty (γ=0.01)', fontsize=14)
 plt.tight_layout()
 
 # Save the figure
-plt.savefig('data_result/plot/Fitting With vs. Without Gradient.png', dpi=300)
+plt.savefig('data_result/plot/Fitting With vs. Without Gradient_nonconvex.png', dpi=300)
 print(f"Plot saved to data_result/plot/error_vs_neurons_gradient_comparison.png")
 
 # =============================================================================
-# NEW CODE FOR EXTRACTING INNER WEIGHTS AND PLOTTING 3D SPHERE
+# PLOT 3: Comparison between different penalty terms (without gradient)
+# Shows how different penalty terms affect L2 and H1 errors when not using gradient
+# =============================================================================
+
+# NEW PLOT: COMPARING WEIGHTS_METADATA_14, WEIGHTS_METADATA_15, WEIGHTS_METADATA_25, AND WEIGHTS_METADATA_24
+# Read data for comparison between L1, gamma=5.0, gamma=0.01, and no penalty (all without gradient)
+neurons_14, l2_errors_14, h1_errors_14, gamma_14, _ = extract_data("data_result/weights/weights_metadata_14.txt")
+neurons_15, l2_errors_15, h1_errors_15, gamma_15, _ = extract_data("data_result/weights/weights_metadata_15.txt")
+neurons_25, l2_errors_25, h1_errors_25, gamma_25, _ = extract_data("data_result/weights/weights_metadata_25.txt")
+neurons_24, l2_errors_24, h1_errors_24, gamma_24, _ = extract_data("data_result/weights/weights_metadata_24.txt")
+
+# Create figure with two subplots
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+
+# Plot L2 errors
+ax1.plot(neurons_15, l2_errors_15, 'b-', label=f'γ={gamma_15}')
+ax1.plot(neurons_25, l2_errors_25, 'r-', label=f'γ={gamma_25}')
+ax1.plot(neurons_14, l2_errors_14, 'g-', label=f'L1')
+ax1.plot(neurons_24, l2_errors_24, 'm-', label=f'no penalty')
+ax1.set_xlabel('Number of Neurons')
+ax1.set_ylabel('L2 Error')
+ax1.set_title('L2 Error vs. Number of Neurons')
+ax1.legend()
+ax1.grid(True)
+ax1.set_xlim(0, 100)  # Set x-axis limits to 100 neurons
+
+# Plot H1 errors
+ax2.plot(neurons_15, h1_errors_15, 'b-', label=f'γ={gamma_15}')
+ax2.plot(neurons_25, h1_errors_25, 'r-', label=f'γ={gamma_25}')
+ax2.plot(neurons_14, h1_errors_14, 'g-', label=f'L1')
+ax2.plot(neurons_24, h1_errors_24, 'm-', label=f'no penalty')
+ax2.set_xlabel('Number of Neurons')
+ax2.set_ylabel('H1 Error')
+ax2.set_title('H1 Error vs. Number of Neurons')
+ax2.legend()
+ax2.grid(True)
+ax2.set_xlim(0, 100)  # Set x-axis limits to 100 neurons
+
+# Set log scale for y-axis on both plots
+ax1.set_yscale('log')
+ax2.set_yscale('log')
+
+# Add a main title
+plt.suptitle('Cost without Gradient: comparing different penalty terms', fontsize=14)
+plt.tight_layout()
+
+# Save the figure
+plt.savefig('data_result/plot/Cost without gradient: comparing different penalty terms.png', dpi=300)
+print(f"Plot saved to data_result/plot/Cost without gradient: comparing different penalty terms.png")
+
+plt.show()
+
+# =============================================================================
+# PLOT 4: Cost with gradient: compare different penalty terms (γ=5.0, γ=0.01, l1, no penalty)
+# Shows how different penalty terms (γ=5.0, γ=0.01, l1, no penalty) affect L2 and H1 errors
+# =============================================================================
+
+# First plot: Comparison between gamma values
+# Create figure with two subplots
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+
+# Plot L2 errors - removed the 'o' marker
+ax1.plot(neurons_20, l2_errors_20, 'b-', label=f'γ={gamma_20}')
+ax1.plot(neurons_21, l2_errors_21, 'r-', label=f'γ={gamma_21}')
+ax1.plot(neurons_22, l2_errors_22, 'g-', label=f'L1')
+ax1.plot(neurons_23, l2_errors_23, 'm-', label=f'no penalty')
+ax1.set_xlabel('Number of Neurons')
+ax1.set_ylabel('L2 Error')
+ax1.set_title('L2 Error vs. Number of Neurons')
+ax1.legend()
+ax1.grid(True)
+ax1.set_xlim(0, 400)  # Set x-axis limits from 0 to 400
+
+# Plot H1 errors - removed the 'o' marker
+ax2.plot(neurons_20, h1_errors_20, 'b-', label=f'γ={gamma_20}')
+ax2.plot(neurons_21, h1_errors_21, 'r-', label=f'γ={gamma_21}')
+ax2.plot(neurons_22, h1_errors_22, 'g-', label=f'L1')
+ax2.plot(neurons_23, h1_errors_23, 'm-', label=f'no penalty')
+ax2.set_xlabel('Number of Neurons')
+ax2.set_ylabel('H1 Error')
+ax2.set_title('H1 Error vs. Number of Neurons')
+ax2.legend()
+ax2.grid(True)
+ax2.set_xlim(0, 400)  # Set x-axis limits from 0 to 400
+
+# Set log scale for y-axis on both plots
+ax1.set_yscale('log')
+ax2.set_yscale('log')
+
+# Add a main title
+plt.suptitle('Cost with Gradient: compare different penalty terms', fontsize=14)
+plt.tight_layout()
+
+# Save the figure
+plt.savefig('data_result/plot/Cost with gradient: compare different penalty terms.png', dpi=300)
+print(f"Plot saved to data_result/plot/error_vs_neurons_gamma_comparison.png")
+
+# =============================================================================
+# PLOT 5: Weight space visualization in polar coordinates
+# Shows the distribution of weights in 2D space for different penalty terms
 # =============================================================================
 
 # Load pickle files
@@ -228,51 +342,6 @@ if weights_20_iter7 is not None and weights_21_iter8 is not None and weights_22_
     plt.show()
 
 # Show all plots
-plt.show()
-
-# =============================================================================
-# NEW PLOT: COMPARING WEIGHTS_METADATA_14 AND WEIGHTS_METADATA_15
-# =============================================================================
-
-# Read data for comparison between gamma=0.01 and gamma=5.0
-neurons_14, l2_errors_14, h1_errors_14, gamma_14, _ = extract_data("data_result/weights/weights_metadata_14.txt")
-neurons_15, l2_errors_15, h1_errors_15, gamma_15, _ = extract_data("data_result/weights/weights_metadata_15.txt")
-
-# Create figure with two subplots
-fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
-
-# Plot L2 errors
-ax1.plot(neurons_14, l2_errors_14, 'b-', label=f'γ={gamma_14}')
-ax1.plot(neurons_15, l2_errors_15, 'r-', label=f'γ={gamma_15}')
-ax1.set_xlabel('Number of Neurons')
-ax1.set_ylabel('L2 Error')
-ax1.set_title('L2 Error vs. Number of Neurons')
-ax1.legend()
-ax1.grid(True)
-ax1.set_xlim(0, 55)  # Set x-axis limits based on data
-
-# Plot H1 errors
-ax2.plot(neurons_14, h1_errors_14, 'b-', label=f'γ={gamma_14}')
-ax2.plot(neurons_15, h1_errors_15, 'r-', label=f'γ={gamma_15}')
-ax2.set_xlabel('Number of Neurons')
-ax2.set_ylabel('H1 Error')
-ax2.set_title('H1 Error vs. Number of Neurons')
-ax2.legend()
-ax2.grid(True)
-ax2.set_xlim(0, 55)  # Set x-axis limits based on data
-
-# Set log scale for y-axis on both plots
-ax1.set_yscale('log')
-ax2.set_yscale('log')
-
-# Add a main title
-plt.suptitle('fitting without gradient: sparcity inducing effect', fontsize=14)
-plt.tight_layout()
-
-# Save the figure
-plt.savefig('data_result/plot/fitting without gradient: sparcity inducing effect.png', dpi=300)
-print(f"Plot saved to data_result/plot/error_vs_neurons_gamma_comparison_14_15.png")
-
 plt.show()
 
 
