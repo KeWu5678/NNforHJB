@@ -234,7 +234,7 @@ if __name__ == "__main__":
         
         # Use a new random seed for each iteration to get different train/test splits
         # np.random.seed(42 + i)
-        model, weight, bias = network(data_dict, activation, power, regularization, loss_weights = loss_weights, inner_weights = weight, inner_bias = bias)
+        model, weight, bias, outer_weights = network(data_dict, activation, power, regularization, loss_weights = loss_weights, inner_weights = weight, inner_bias = bias)
         print(f"After concatenation - weight shape: {weight.shape}, bias shape: {bias.shape}")
         
         # Get metrics from the model's losshistory object

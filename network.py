@@ -32,6 +32,7 @@ def network(data, activation,  power, regularization, loss_weights = (1.0, 1.0),
         model: the trained model (includes model.losshistory with all loss/metrics)
         weight: the weights of the inner neurons
         bias: the bias of the inner neurons
+        output_weight: the weights of the output layer
     """
     training_percentage = 0.9
 
@@ -166,7 +167,7 @@ def network(data, activation,  power, regularization, loss_weights = (1.0, 1.0),
     
     # Train the model
     # losshistory and train_state are saved as model.losshistory and model.train_state
-    model.train(iterations=20000, display_every=1000, model_save_path=model_save_path)
+    model.train(iterations=20000, batch_size=810, display_every=1000, model_save_path=model_save_path)
     
     # All training and testing errors are available in model.losshistory
     # - model.losshistory.loss_train: training loss
@@ -175,13 +176,14 @@ def network(data, activation,  power, regularization, loss_weights = (1.0, 1.0),
     
     # Detach the tensors to remove them from the computation graph before returning
     weight, bias = model.net.get_hidden_params()
-    return model, weight.numpy(), bias.numpy()
+    outer_weight = model.net.get_output_params()
+    return model, weight.numpy(), bias.numpy(), outer_weight.numpy()
     
 if __name__ == "__main__":
     data = np.load("data_result/raw_data/VDP_beta_0.1_grid_30x30.npy")
     weights = np.random.randn(73, 2)
     bias = np.random.randn(73)
     regularization = ('l1', 0.0) #('phi', 0.01, 0.01)
-    model, weight, bias = network(data, "relu", 2.0, regularization, loss_weights = (1.0, 1.0), inner_weights=weights, inner_bias=bias)
+    model, weight, bias, output_weight = network(data, "relu", 2.0, regularization, loss_weights = (1.0, 1.0), inner_weights=weights, inner_bias=bias)
 
 
