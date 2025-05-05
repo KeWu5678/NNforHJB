@@ -147,13 +147,13 @@ if __name__ == "__main__":
     path = 'data_result/raw_data/VDP_beta_0.1_grid_30x30.npy'# Initialize the weights
     dataset = np.load(path)
     power = 2
-    gamma = 0.01
+    gamma = 10.0
     M = 50 # number greedy insertion selected
     alpha = 1e-05
     regularization = ('phi', gamma, alpha) #('l1', alpha)
     activation = "relu"
     num_iterations = 20
-    loss_weights = (1.0, 0.0)
+    loss_weights = (1.0, 1.0)
     # Data inspection
     print(f"Loaded dataset from {path}")
     print(f"Dataset shape: {dataset.shape}")
@@ -174,10 +174,10 @@ if __name__ == "__main__":
     data_dict['dv'] = data_dict['dv'][permutation]
     data_dict['v'] = data_dict['v'][permutation]
     
-    # Initialize the model with zero weights
-    init_weights = np.random.randn(2, 2)
-    init_bias = np.random.randn(2)
-    model, weight, bias = network(data_dict, activation, power, regularization, loss_weights = loss_weights, inner_weights = init_weights, inner_bias = init_bias) 
+    # Initialize the model with zero neurons (no hidden layer)
+    init_weights = None
+    init_bias = None
+    model, weight, bias, outer_weights = network(data_dict, activation, power, regularization, loss_weights = loss_weights, inner_weights = init_weights, inner_bias = init_bias)
     
     print("Initialization done")
     print(f"Initial weights shape: {weight.shape}, bias shape: {bias.shape}")
@@ -205,6 +205,7 @@ if __name__ == "__main__":
         'train_loss': [train_loss],
         'test_loss': [test_loss],
         'test_metrics': [test_metrics],
+        'pruned_neurons': [0],  # No pruning on iteration 0
         'hyperparameters': {
             'activation': activation,
             'power': power,
@@ -235,7 +236,38 @@ if __name__ == "__main__":
         # Use a new random seed for each iteration to get different train/test splits
         # np.random.seed(42 + i)
         model, weight, bias, outer_weights = network(data_dict, activation, power, regularization, loss_weights = loss_weights, inner_weights = weight, inner_bias = bias)
-        print(f"After concatenation - weight shape: {weight.shape}, bias shape: {bias.shape}")
+        
+        # # Remove neurons with small outer weights
+        # pruning_threshold = 1e-3
+        
+        # # Only attempt pruning if we have neurons to prune
+        # if outer_weights is not None and len(weight) > 0:
+        #     # Get the absolute values of the outer weights
+        #     outer_weights_abs = np.abs(outer_weights)
+            
+        #     # Find indices of neurons to keep (where outer weights >= threshold)
+        #     keep_indices = np.where(outer_weights_abs >= pruning_threshold)[0]
+            
+        #     # Calculate how many neurons would be pruned
+        #     pruned_count = len(weight) - len(keep_indices)
+            
+        #     # Prune the weights and bias if needed
+        #     if pruned_count > 0 and len(keep_indices) > 0:
+        #         print(f"Pruning: Removing {pruned_count} neurons with outer weights < {pruning_threshold}")
+        #         weight = weight[keep_indices]
+        #         bias = bias[keep_indices]
+        #         print(f"After pruning - weight shape: {weight.shape}, bias shape: {bias.shape}")
+        #     else:
+        #         if pruned_count > 0:
+        #             print(f"Warning: Cannot prune all {pruned_count} neurons - would leave no neurons")
+        #         else:
+        #             print(f"No neurons pruned (all {len(weight)} neurons have outer weights >= {pruning_threshold})")
+        #         pruned_count = 0
+        # else:
+        #     pruned_count = 0
+        #     print("No pruning performed (no neurons or outer weights not available)")
+        
+        # print(f"After pruning - Final network has {weight.shape[0]} neurons")
         
         # Get metrics from the model's losshistory object
         train_loss = model.losshistory.loss_train[-1] if len(model.losshistory.loss_train) > 0 else None
@@ -254,6 +286,9 @@ if __name__ == "__main__":
         weights_history['train_loss'].append(train_loss)
         weights_history['test_loss'].append(test_loss)
         weights_history['test_metrics'].append(test_metrics)
+        
+        # # Also store pruning information if we're tracking that
+        # weights_history['pruned_neurons'].append(pruned_count)
         
         # Print model performance
         if train_loss is not None:
@@ -331,6 +366,11 @@ if __name__ == "__main__":
             test_loss = weights_history['test_loss'][i]
             test_metrics = weights_history['test_metrics'][i]
             
+            # pruned_info = ""
+            # if i > 0 and 'pruned_neurons' in weights_history:
+            #     pruned_info = f" (pruned {weights_history['pruned_neurons'][i]} neurons)"
+                
+            # f.write(f"Iteration {i}: {count} neurons{pruned_info}\n")
             f.write(f"Iteration {i}: {count} neurons\n")
             
             # Write train loss without sum

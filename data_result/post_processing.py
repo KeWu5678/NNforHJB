@@ -19,7 +19,7 @@ def extract_data(file_path):
     
     # Special handling for specific files
     if "weights_metadata_20.txt" in file_path:
-        gamma = 5.0
+        gamma = 10.0
     elif "weights_metadata_21.txt" in file_path:
         gamma = 0.01
     elif "weights_metadata_22.txt" in file_path:
