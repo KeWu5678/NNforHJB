@@ -157,7 +157,7 @@ def network(data, activation,  power, regularization, loss_weights = (1.0, 1.0),
     h1_metric = lambda y_true, y_pred: h1_error(y_true, y_pred, data.test_x, model)
     
     # Add both "mean squared error" and our custom H1 error metric
-    model.compile("adam", lr=0.005, loss="mse", metrics=["mean squared error", h1_metric], 
+    model.compile("adam", lr=0.001, loss="mse", metrics=["mean squared error", h1_metric], 
                  loss_weights=[loss_weights[0], loss_weights[1], loss_weights[1]])  # Value matching gets higher weight
 
     current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -167,7 +167,7 @@ def network(data, activation,  power, regularization, loss_weights = (1.0, 1.0),
     
     # Train the model
     # losshistory and train_state are saved as model.losshistory and model.train_state
-    model.train(iterations=20000, batch_size=810, display_every=1000, model_save_path=model_save_path)
+    model.train(iterations=20000, batch_size=810, display_every=1000)
     
     # All training and testing errors are available in model.losshistory
     # - model.losshistory.loss_train: training loss

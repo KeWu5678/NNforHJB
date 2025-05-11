@@ -18,6 +18,7 @@ import datetime
 
 
 from network import network
+from network_outerweights import network_outerweights
 from greedy_insertion import insertion
 
 
@@ -147,13 +148,14 @@ if __name__ == "__main__":
     path = 'data_result/raw_data/VDP_beta_0.1_grid_30x30.npy'# Initialize the weights
     dataset = np.load(path)
     power = 2
-    gamma = 10.0
-    M = 50 # number greedy insertion selected
-    alpha = 1e-05
-    regularization = ('phi', gamma, alpha) #('l1', alpha)
+    gamma = 0.0
+    M = 20 # number greedy insertion selected
+    alpha = 0.0
+    regularization = ('l1', alpha) #('phi', gamma, alpha)
     activation = "relu"
     num_iterations = 20
     loss_weights = (1.0, 1.0)
+    pruning_threshold = 1e-3
     # Data inspection
     print(f"Loaded dataset from {path}")
     print(f"Dataset shape: {dataset.shape}")
@@ -235,39 +237,59 @@ if __name__ == "__main__":
         
         # Use a new random seed for each iteration to get different train/test splits
         # np.random.seed(42 + i)
-        model, weight, bias, outer_weights = network(data_dict, activation, power, regularization, loss_weights = loss_weights, inner_weights = weight, inner_bias = bias)
+        model, weight_prefiltered, bias_prefiltered, outer_weights_prefiltered = network(data_dict, activation, power, regularization, loss_weights = loss_weights, inner_weights = weight, inner_bias = bias)
+        print(f"removing the outer weights")
+        model, weight, bias, outer_weights = network_outerweights(
+            data_dict, activation, power, regularization, loss_weights = loss_weights, inner_weights = weight_prefiltered, inner_bias = bias_prefiltered, outer_weights = outer_weights_prefiltered
+            )
         
-        # # Remove neurons with small outer weights
-        # pruning_threshold = 1e-3
+        # Count outer weights elements with small absolute values
+        # Convert to flat array if needed
+        flat_outer_weights_pre = outer_weights_prefiltered.flatten() if hasattr(outer_weights_prefiltered, 'flatten') else outer_weights_prefiltered
+        flat_outer_weights = outer_weights.flatten() if hasattr(outer_weights, 'flatten') else outer_weights
         
-        # # Only attempt pruning if we have neurons to prune
-        # if outer_weights is not None and len(weight) > 0:
-        #     # Get the absolute values of the outer weights
-        #     outer_weights_abs = np.abs(outer_weights)
-            
-        #     # Find indices of neurons to keep (where outer weights >= threshold)
-        #     keep_indices = np.where(outer_weights_abs >= pruning_threshold)[0]
-            
-        #     # Calculate how many neurons would be pruned
-        #     pruned_count = len(weight) - len(keep_indices)
-            
-        #     # Prune the weights and bias if needed
-        #     if pruned_count > 0 and len(keep_indices) > 0:
-        #         print(f"Pruning: Removing {pruned_count} neurons with outer weights < {pruning_threshold}")
-        #         weight = weight[keep_indices]
-        #         bias = bias[keep_indices]
-        #         print(f"After pruning - weight shape: {weight.shape}, bias shape: {bias.shape}")
-        #     else:
-        #         if pruned_count > 0:
-        #             print(f"Warning: Cannot prune all {pruned_count} neurons - would leave no neurons")
-        #         else:
-        #             print(f"No neurons pruned (all {len(weight)} neurons have outer weights >= {pruning_threshold})")
-        #         pruned_count = 0
-        # else:
-        #     pruned_count = 0
-        #     print("No pruning performed (no neurons or outer weights not available)")
+        # Count elements with absolute value less than threshold
+
+        small_weights_count = np.sum(np.abs(flat_outer_weights_pre) < pruning_threshold)
+        small_weights_filtered_count = np.sum(np.abs(flat_outer_weights) < pruning_threshold)
         
-        # print(f"After pruning - Final network has {weight.shape[0]} neurons")
+        print(f"Outer weights shape: {np.shape(outer_weights_prefiltered)} -> {np.shape(outer_weights)}")
+        print(f"Elements with abs value < {pruning_threshold}: {small_weights_count}/{len(flat_outer_weights_pre)} vs filtered: {small_weights_filtered_count}/{len(flat_outer_weights)}")
+        
+        
+        # Delete neurons whose outer weights are under the pruning threshold
+        if outer_weights is not None and len(weight_prefiltered) > 0:
+            # Get the absolute values of the outer weights
+            outer_weights_abs = np.abs(flat_outer_weights)
+            
+            # Find indices of neurons to keep (where outer weights >= threshold)
+            keep_indices = np.where(outer_weights_abs >= pruning_threshold)[0]
+            
+            # Calculate how many neurons would be pruned
+            pruned_count = len(weight_prefiltered) - len(keep_indices)
+            
+            # Prune the weights and bias if needed
+            if pruned_count > 0 and len(keep_indices) > 0:
+                print(f"Pruning: Removing {pruned_count} neurons with outer weights < {pruning_threshold}")
+                weight = weight_prefiltered[keep_indices]
+                bias = bias_prefiltered[keep_indices]
+                print(f"After pruning - weight shape: {weight.shape}, bias shape: {bias.shape}")
+            else:
+                if pruned_count > 0:
+                    print(f"Warning: Cannot prune all {pruned_count} neurons - would leave no neurons")
+                else:
+                    print(f"No neurons pruned (all {len(weight_prefiltered)} neurons have outer weights >= {pruning_threshold})")
+                pruned_count = 0
+                # Keep the original weights and biases
+                weight = weight_prefiltered
+                bias = bias_prefiltered
+        else:
+            pruned_count = 0
+            print("No pruning performed (no neurons or outer weights not available)")
+            weight = weight_prefiltered
+            bias = bias_prefiltered
+        
+        print(f"After pruning - Final network has {weight.shape[0]} neurons")
         
         # Get metrics from the model's losshistory object
         train_loss = model.losshistory.loss_train[-1] if len(model.losshistory.loss_train) > 0 else None
@@ -287,8 +309,8 @@ if __name__ == "__main__":
         weights_history['test_loss'].append(test_loss)
         weights_history['test_metrics'].append(test_metrics)
         
-        # # Also store pruning information if we're tracking that
-        # weights_history['pruned_neurons'].append(pruned_count)
+        # Also store pruning information if we're tracking that
+        weights_history['pruned_neurons'].append(pruned_count)
         
         # Print model performance
         if train_loss is not None:
@@ -366,12 +388,13 @@ if __name__ == "__main__":
             test_loss = weights_history['test_loss'][i]
             test_metrics = weights_history['test_metrics'][i]
             
-            # pruned_info = ""
-            # if i > 0 and 'pruned_neurons' in weights_history:
-            #     pruned_info = f" (pruned {weights_history['pruned_neurons'][i]} neurons)"
+            pruned_info = ""
+            if i > 0 and 'pruned_neurons' in weights_history:
+                pruned_info = f" (pruned {weights_history['pruned_neurons'][i]} neurons)"
+            else:
+                pruned_info = ""
                 
-            # f.write(f"Iteration {i}: {count} neurons{pruned_info}\n")
-            f.write(f"Iteration {i}: {count} neurons\n")
+            f.write(f"Iteration {i}: {count} neurons{pruned_info}\n")
             
             # Write train loss without sum
             if isinstance(train_loss, (list, np.ndarray)):
