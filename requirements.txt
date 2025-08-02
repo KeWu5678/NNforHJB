@@ -1,0 +1,23 @@
+# Core scientific computing
+numpy>=1.26.0
+scipy>=1.13.0
+
+# Machine learning and neural networks
+torch>=2.0.0
+
+# Logging
+loguru>=0.7.0
+
+# Data visualization and plotting
+matplotlib>=3.9.0
+
+# Optional packages (used in some auxiliary scripts):
+# scikit-learn>=1.5.0  # Used only in data_result/post_processing.py
+# pandas>=2.2.0        # Used only in some conda environments
+
+# Development and code quality (optional)
+# These are not strictly required for running the main code
+# but useful for development
+# black>=24.0.0
+# flake8>=7.0.0
+# pytest>=7.4.0 
