@@ -328,14 +328,29 @@ class model_outerweights:
         
         # Create a simple model wrapper to match original interface
         class ModelWrapper:
-            def __init__(self, net, loss_history):
+            def __init__(self, net, loss_history, loss_weights):
                 self.net = net
+                self.loss_weights = loss_weights
                 self.losshistory = type('obj', (object,), {
                     'loss_train': loss_history['train_loss'],
                     'loss_test': loss_history['val_loss']
                 })()
+            
+            def predict(self, x, operator=None):
+                """Predict method for compatibility with greedy_insertion.py"""
+                if isinstance(x, np.ndarray):
+                    x = torch.tensor(x, dtype=torch.float64, requires_grad=True)
+                
+                self.net.eval()
+                with torch.no_grad() if operator is None else torch.enable_grad():
+                    pred = self.net(x)
+                    if operator is not None:
+                        # Apply custom operator (e.g., gradient computation)
+                        return operator(x, pred).detach().cpu().numpy()
+                    else:
+                        return pred.detach().cpu().numpy()
         
-        model_wrapper = ModelWrapper(self.net, self.loss_history)
+        model_wrapper = ModelWrapper(self.net, self.loss_history, self.loss_weights)
         logger.info("Training completed successfully (outer weights only)")
         
         return model_wrapper, weight.numpy(), bias.numpy(), outer_weight.numpy()
