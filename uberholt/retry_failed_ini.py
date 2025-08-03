@@ -8,7 +8,7 @@ This loads existing results rather than regenerating the entire dataset.
 import os
 import numpy as np
 from scipy.spatial.distance import cdist
-import openloop_legendre as op
+import openloop_optimizer as op
 from test_VDP import VDP, V, gradient, gen_bc
 
 # Load the existing dataset and failed initial conditions
