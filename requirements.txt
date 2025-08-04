@@ -1,23 +1,35 @@
-# Core scientific computing
-numpy>=1.26.0
-scipy>=1.13.0
+# Core Scientific Computing
+numpy>=1.21.0
+scipy>=1.7.0
 
-# Machine learning and neural networks
-torch>=2.0.0
+# Deep Learning Framework
+torch>=1.9.0
+torchvision>=0.10.0
+
+# Machine Learning
+scikit-learn>=1.0.0
+
+# Visualization
+matplotlib>=3.5.0
 
 # Logging
-loguru>=0.7.0
+loguru>=0.6.0
 
-# Data visualization and plotting
-matplotlib>=3.9.0
+# Data Processing
+pickle5>=0.0.11; python_version < "3.8"
 
-# Optional packages (used in some auxiliary scripts):
-# scikit-learn>=1.5.0  # Used only in data_result/post_processing.py
-# pandas>=2.2.0        # Used only in some conda environments
+# Optional: DeepXDE (if using the deepxde backend)
+# deepxde>=1.0.0
 
-# Development and code quality (optional)
-# These are not strictly required for running the main code
-# but useful for development
-# black>=24.0.0
-# flake8>=7.0.0
-# pytest>=7.4.0 
+# Development and Testing
+pytest>=6.0.0
+pytest-cov>=2.0.0
+
+# Jupyter (for notebooks if any)
+jupyter>=1.0.0
+ipykernel>=6.0.0
+
+# Code Quality
+black>=21.0.0
+flake8>=3.9.0
+isort>=5.9.0 

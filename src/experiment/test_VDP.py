@@ -5,19 +5,11 @@ Created on Mon Nov 25 20:32:26 2024
 
 @author: chaoruiz
 """
-import os
-import sys
-# Add the parent directory (src/) to the path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from model import model
-from model_outerweights import model_outerweights
-from greedy_insertion import insertion
+from src.model import model
+from src.model_outerweights import model_outerweights
+from src.greedy_insertion import insertion
 
-import openloop_optimizer as op
 import numpy as np
-import numpy.polynomial.chebyshev as cheb
-import utils 
-import datetime
 from loguru import logger
 import torch
 
@@ -149,66 +141,66 @@ for i in range(num_iterations - 1):
 #     print(f"first loss_history item type: {type(loss_history[0])}")
 
 # Save everything in a single file using pickle
-output_file = os.path.join(weights_dir, "training_history.pkl")
-try:
-    # Add loss history to the weights_history dictionary
-    weights_history['loss_history'] = loss_history
+# output_file = os.path.join(weights_dir, "training_history.pkl")
+# try:
+#     # Add loss history to the weights_history dictionary
+#     weights_history['loss_history'] = loss_history
     
-    # Save everything in a single pickle file
-    import pickle
-    with open(output_file, 'wb') as f:
-        pickle.dump(weights_history, f)
-    print(f"\nAll training history saved to {output_file}")
-except Exception as e:
-    print(f"Error saving data: {e}")
+#     # Save everything in a single pickle file
+#     import pickle
+#     with open(output_file, 'wb') as f:
+#         pickle.dump(weights_history, f)
+#     print(f"\nAll training history saved to {output_file}")
+# except Exception as e:
+#     print(f"Error saving data: {e}")
     
-    # Fallback to save at least the metadata
-    try:
-        output_file_npz = os.path.join(weights_dir, "training_history_metadata.npz")
-        np.savez(
-            output_file_npz,
-            iterations=np.array(weights_history['iteration']),
-            neuron_counts=np.array(weights_history['neuron_count'])
-        )
-        print(f"Metadata saved to {output_file_npz}")
-    except Exception as e2:
-        print(f"Error saving metadata: {e2}")
+#     # Fallback to save at least the metadata
+#     try:
+#         output_file_npz = os.path.join(weights_dir, "training_history_metadata.npz")
+#         np.savez(
+#             output_file_npz,
+#             iterations=np.array(weights_history['iteration']),
+#             neuron_counts=np.array(weights_history['neuron_count'])
+#         )
+#         print(f"Metadata saved to {output_file_npz}")
+#     except Exception as e2:
+#         print(f"Error saving metadata: {e2}")
 
-# Save a more comprehensive metadata file in text format for easier access
-with open(os.path.join(weights_dir, "weights_metadata.txt"), "w") as f:
-    f.write(f"Training run at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-    f.write(f"Hyperparameters: activation={activation}, power={power}, gamma={gamma}, loss_weights={loss_weights}, alpha={alpha}\n\n")
-    f.write("Iteration summary:\n")
-    for i, count in enumerate(weights_history['neuron_count']):
-        train_loss = weights_history['train_loss'][i]
-        test_loss = weights_history['test_loss'][i]
-        test_metrics = weights_history['test_metrics'][i]
+# # Save a more comprehensive metadata file in text format for easier access
+# with open(os.path.join(weights_dir, "weights_metadata.txt"), "w") as f:
+#     f.write(f"Training run at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+#     f.write(f"Hyperparameters: activation={activation}, power={power}, gamma={gamma}, loss_weights={loss_weights}, alpha={alpha}\n\n")
+#     f.write("Iteration summary:\n")
+#     for i, count in enumerate(weights_history['neuron_count']):
+#         train_loss = weights_history['train_loss'][i]
+#         test_loss = weights_history['test_loss'][i]
+#         test_metrics = weights_history['test_metrics'][i]
         
-        pruned_info = ""
-        if i > 0 and 'pruned_neurons' in weights_history:
-            pruned_info = f" (pruned {weights_history['pruned_neurons'][i]} neurons)"
-        else:
-            pruned_info = ""
+#         pruned_info = ""
+#         if i > 0 and 'pruned_neurons' in weights_history:
+#             pruned_info = f" (pruned {weights_history['pruned_neurons'][i]} neurons)"
+#         else:
+#             pruned_info = ""
             
-        f.write(f"Iteration {i}: {count} neurons{pruned_info}\n")
+#         f.write(f"Iteration {i}: {count} neurons{pruned_info}\n")
         
-        # Write train loss without sum
-        if isinstance(train_loss, (list, np.ndarray)):
-            f.write(f"  train loss: {train_loss}\n")
-        else:
-            f.write(f"  train loss: {train_loss}\n")
+#         # Write train loss without sum
+#         if isinstance(train_loss, (list, np.ndarray)):
+#             f.write(f"  train loss: {train_loss}\n")
+#         else:
+#             f.write(f"  train loss: {train_loss}\n")
             
-        # Write test loss without sum
-        if isinstance(test_loss, (list, np.ndarray)):
-            f.write(f"  test loss: {test_loss}\n")
-        else:
-            f.write(f"  test loss: {test_loss}\n")
+#         # Write test loss without sum
+#         if isinstance(test_loss, (list, np.ndarray)):
+#             f.write(f"  test loss: {test_loss}\n")
+#         else:
+#             f.write(f"  test loss: {test_loss}\n")
             
-        # Write test metrics without sum
-        if isinstance(test_metrics, (list, np.ndarray)):
-            f.write(f"  test metrics: {test_metrics}\n\n")
-        else:
-            f.write(f"  test metrics: {test_metrics}\n\n")
+#         # Write test metrics without sum
+#         if isinstance(test_metrics, (list, np.ndarray)):
+#             f.write(f"  test metrics: {test_metrics}\n\n")
+#         else:
+#             f.write(f"  test metrics: {test_metrics}\n\n")
 
 
     

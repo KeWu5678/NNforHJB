@@ -1,10 +1,7 @@
 import numpy as np
 import torch
 from scipy.optimize import minimize
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from utils import remove_duplicates
+from .utils import remove_duplicates
 def insertion(data, model, N, alpha):
     """
     Args:

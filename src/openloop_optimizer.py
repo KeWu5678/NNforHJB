@@ -8,10 +8,7 @@ Created on Tue Dec  3 18:30:52 2024
 
 
 import numpy as np
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import utils 
+from . import utils 
 from scipy.integrate import solve_bvp
 import matplotlib.pyplot as plt
 

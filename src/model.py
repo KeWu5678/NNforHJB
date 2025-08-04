@@ -13,7 +13,6 @@ import torch
 import sys
 import os
 from loguru import logger
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ssn import SSN
 from net import ShallowNetwork
 

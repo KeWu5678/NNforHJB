@@ -149,7 +149,7 @@ class SSN(Optimizer):
             S = self.hidden_activations  # shape: (batch_size, n_neurons)
             STS = S.T @ S / S.shape[0]    # shape: (n_neurons, n_neurons), normalized by batch size
             hessian_data_term = STS @ DPc
-            logger.debug(f"Using correct Gauss-Newton Hessian: S^T*S*DPc, S shape: {S.shape}")
+            # logger.debug(f"Using correct Gauss-Newton Hessian: S^T*S*DPc, S shape: {S.shape}")
         else:
             # Fallback to identity if hidden activations not available
             hessian_data_term = I @ DPc
@@ -305,21 +305,7 @@ class SSN(Optimizer):
                 break
             # ------------------------------------------------------------------
             if iter_ls < 10 or iter_ls % 20 == 0:  # Only log occasionally
-                logger.debug(f"Damping step {iter_ls}: theta={theta:.2e}, loss_new={loss_new.item():.6e}")
-
-            # Damped Newton update: delayed-gratification, shrink the damping for the next try (MATLAB line 107)
-            theta = theta / 4.0        
-
-            try:
-                qnew = q - torch.linalg.solve(DG + (1/theta) * I, Gq)
-            except Exception as e:
-                logger.error(f"Damped linear solve failed: {e}")
-                # Restore original parameters
-                self._update_parameters(params)
-                return loss
-            
-            unew = self._compute_prox(qnew, self.alpha / self.c)
-
+                logger.debug(f"Damping step {iter_ls}: theta={theta:.2e}, loss_new={loss_new.item():.10e}")
             # ------------------------------------------------------------------
             # SAFETY GUARD 2: if the tentative step exploded, back-track harder
             # ------------------------------------------------------------------
@@ -327,17 +313,25 @@ class SSN(Optimizer):
                 logger.warning("unew contains Inf/NaN – increasing damping (theta *= 4) and retrying")
                 theta = theta * 4.0  # undo last division so next loop will divide again
                 iter_ls += 1
-                continue
-            # ------------------------------------------------------------------
-            
-            # Update parameters temporarily to evaluate new lossective
-            self._update_parameters(unew)
-            loss_new = closure() + self.alpha * torch.sum(self._phi(torch.abs(unew)))
-            
+                break
+            # ------------------------------------------------------------------   
+
             # Check for NaN early and break
             if torch.isnan(loss_new) and iter_ls > 50:
                 logger.warning("Persistent NaN in line search, stopping")
                 break
+
+            try:
+                qnew = q - torch.linalg.solve(DG + (1/theta) * I, Gq)
+                unew = self._compute_prox(qnew, self.alpha / self.c)
+                self._update_parameters(unew)
+                loss_new = closure()
+                theta = theta / 4.0 
+            except Exception as e:
+                logger.error(f"Damped linear solve failed: {e}")
+                # Restore original parameters
+                self._update_parameters(params)
+                return loss 
             
             iter_ls += 1
         
@@ -361,8 +355,8 @@ class SSN(Optimizer):
             return loss
         
         # Successful step - parameters are already updated
-        descent = loss.item() - loss_new.item()
-        support = torch.sum(torch.abs(unew) > 1e-8).item()
+        # descent = loss.item() - loss_new.item()
+        # support = torch.sum(torch.abs(unew) > 1e-8).item()
         
         # logger.info(f"Line search successful: {iter_ls} iterations, descent: {descent:.6e}")
         # logger.info(f"Support: {support}, damping ratio: {theta/theta0:.2e}")

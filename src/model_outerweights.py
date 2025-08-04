@@ -10,7 +10,6 @@ import torch
 import sys
 import os
 from loguru import logger
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ssn import SSN
 from net_outerweights import ShallowOuterWeightsNetwork
 from model import model
@@ -386,6 +385,7 @@ if __name__ == "__main__":
     n_neurons = 100
     weights = np.random.randn(n_neurons, 2) * 0.1
     bias = np.random.randn(n_neurons) * 0.1
+    outer_weights = np.random.randn(n_neurons, 1) * 0.1
     regularization = (1, 0.01)
     
     # Using the new class interface
