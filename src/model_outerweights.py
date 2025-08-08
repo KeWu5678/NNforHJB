@@ -10,9 +10,10 @@ import torch
 import sys
 import os
 from loguru import logger
-from ssn import SSN
-from net_outerweights import ShallowOuterWeightsNetwork
-from model import model
+from .ssn import SSN
+from .ssn_tr import SSN_TR
+from .net_outerweights import ShallowOuterWeightsNetwork
+from .model import model
 
 
 class model_outerweights:
@@ -167,6 +168,11 @@ class model_outerweights:
             output_params = [self.net.output.weight]
             self.optimizer = SSN(output_params, alpha=self.alpha, gamma=self.gamma)
             logger.info(f"Using SSN optimizer with alpha={self.alpha}, gamma={self.gamma}")
+        elif self.optimizer_type == "SSN_TR":
+            # Use SSN_TR optimizer for outer weights only
+            output_params = [self.net.output.weight]
+            self.optimizer = SSN_TR(output_params, alpha=self.alpha, gamma=self.gamma)
+            logger.info(f"Using SSN_TR optimizer with alpha={self.alpha}, gamma={self.gamma}")
         elif self.optimizer_type == "Adam" or self.optimizer_type is None:
             # Use Adam optimizer for outer weights only
             self.optimizer = torch.optim.Adam([self.net.output.weight], lr=0.0001)
@@ -279,7 +285,7 @@ class model_outerweights:
                 )
                 
                 # For SSN optimizer, provide hidden activations for Gauss-Newton Hessian
-                if isinstance(self.optimizer, SSN):
+                if isinstance(self.optimizer, (SSN, SSN_TR)):
                     self.optimizer.set_hidden_activations(hidden_activations)
                     total_loss.backward(retain_graph=True)
                 else:
@@ -287,7 +293,7 @@ class model_outerweights:
                 return total_loss
             
             # Compute loss and backprop
-            if isinstance(self.optimizer, SSN):
+            if isinstance(self.optimizer, (SSN, SSN_TR)):
                 loss = self.optimizer.step(closure)
             else:
                 total_loss, value_loss, grad_loss, _ = self._compute_loss(
@@ -377,31 +383,31 @@ class model_outerweights:
 #     return vdp_model.train(data, inner_weights, inner_bias, outer_weights)
 
 
-if __name__ == "__main__":
-    # Example usage with the new class interface - simplified
-    data = np.load("data_result/raw_data/VDP_beta_0.1_grid_30x30.npy", allow_pickle=True)
+# if __name__ == "__main__":
+#     # Example usage with the new class interface - simplified
+#     data = np.load("data_result/raw_data/VDP_beta_0.1_grid_30x30.npy", allow_pickle=True)
     
-    # Use smaller network with better initialization
-    n_neurons = 100
-    weights = np.random.randn(n_neurons, 2) * 0.1
-    bias = np.random.randn(n_neurons) * 0.1
-    outer_weights = np.random.randn(n_neurons, 1) * 0.1
-    regularization = (1, 0.01)
+#     # Use smaller network with better initialization
+#     n_neurons = 100
+#     weights = np.random.randn(n_neurons, 2) * 0.1
+#     bias = np.random.randn(n_neurons) * 0.1
+#     outer_weights = np.random.randn(n_neurons, 1) * 0.1
+#     regularization = (1, 0.01)
     
-    # Using the new class interface
-    vdp_model = model(data, torch.relu, 2.0, regularization, optimizer='SSN', loss_weights=(1.0, 0.0))
-    model_result, weight, bias, outputerweight = vdp_model.train(
-        inner_weights=weights, inner_bias=bias, 
-        iterations=10000,
-        display_every=1000
-    )
+#     # Using the new class interface
+#     vdp_model = model(data, torch.relu, 2.0, regularization, optimizer='SSN_TR', loss_weights=(1.0, 0.0))
+#     model_result, weight, bias, outputerweight = vdp_model.train(
+#         inner_weights=weights, inner_bias=bias, 
+#         iterations=10000,
+#         display_every=1000
+#     )
     
-    # Using the new class interface
-    vdp_model = model_outerweights(data, torch.relu, 2.0, regularization, optimizer='SSN', loss_weights=(1.0, 0.0))
-    model_result, weight, bias, output_weight = vdp_model.train(
-        inner_weights=weights, inner_bias=bias, outer_weights=outputerweight,
-        iterations=10000,
-        display_every=500
-    )
+#     # Using the new class interface
+#     # vdp_model = model_outerweights(data, torch.relu, 2.0, regularization, optimizer='SSN', loss_weights=(1.0, 0.0))
+#     # model_result, weight, bias, output_weight = vdp_model.train(
+#     #     inner_weights=weights, inner_bias=bias, outer_weights=outputerweight,
+#     #     iterations=10000,
+#     #     display_every=500
+#     # )
 
 
