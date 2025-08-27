@@ -29,7 +29,7 @@ class model_outerweights:
     """
     
     def __init__(self, data, activation, power, regularization, 
-                 optimizer="SSN", loss_weights=(1.0, 1.0), training_percentage=0.9, th=0.5):
+                 optimizer="SSN", loss_weights=(1.0, 1.0), training_percentage=0.9, th=0.5, verbose=True):
         """
         Initialize the VDP model for outer weights training.
         
@@ -40,6 +40,8 @@ class model_outerweights:
             optimizer: Optimizer type ("Adam" or "SSN")
             loss_weights: Weights for (value_loss, gradient_loss) (default: (1.0, 1.0))
             training_percentage: Fraction of data for training (default: 0.9)
+            th: Interpolation parameter between L1 (th=0) and non-convex (th=1) (default: 0.5)
+            verbose: Whether to print training progress to terminal (default: True)
         """
         self.activation = activation
         self.power = power
@@ -48,6 +50,7 @@ class model_outerweights:
         self.training_percentage = training_percentage
         self.optimizer_type = optimizer
         self.th = th
+        self.verbose = verbose
         # Extract regularization parameters
         self.alpha = regularization[1]
         self.gamma = regularization[0]
@@ -64,13 +67,16 @@ class model_outerweights:
     def _configure_logger(self):
         """Configure loguru logger for training output."""
         logger.remove()  # Remove default handler
-        logger.add(
-            sys.stdout,
-            format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
-            level="INFO"
-        )
         
-        # Also log to file
+        if self.verbose:
+            # Add terminal output only if verbose is True
+            logger.add(
+                sys.stdout,
+                format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
+                level="INFO"
+            )
+        
+        # Always log to file
         current_dir = os.path.dirname(os.path.abspath(__file__))
         log_file = os.path.join(current_dir, "training_outerweights.log")
         logger.add(
@@ -80,7 +86,8 @@ class model_outerweights:
             rotation="10 MB"
         )
         
-        logger.info("VDPModel (outer weights) initialized")
+        if self.verbose:
+            logger.info("VDPModel (outer weights) initialized")
     
     def _prepare_data(self, data):
         """
@@ -124,12 +131,13 @@ class model_outerweights:
         valid_v = ob_v[valid_indices].astype(np.float64)
         valid_dv = ob_dv[valid_indices].astype(np.float64)
         
-        logger.info(f"Training set: {len(train_x)} samples, Validation set: {len(valid_x)} samples")
-        
-        # Optional: Log data statistics for debugging
-        logger.info(f"Data ranges - x: [{train_x.min():.2f}, {train_x.max():.2f}], "
-                   f"v: [{train_v.min():.2f}, {train_v.max():.2f}], "
-                   f"dv: [{train_dv.min():.2f}, {train_dv.max():.2f}]")
+        if self.verbose:
+            logger.info(f"Training set: {len(train_x)} samples, Validation set: {len(valid_x)} samples")
+            
+            # Optional: Log data statistics for debugging
+            logger.info(f"Data ranges - x: [{train_x.min():.2f}, {train_x.max():.2f}], "
+                       f"v: [{train_v.min():.2f}, {train_v.max():.2f}], "
+                       f"dv: [{train_dv.min():.2f}, {train_dv.max():.2f}]")
         
         # Convert to tensors
         train_tensors = (
@@ -166,29 +174,35 @@ class model_outerweights:
         if self.optimizer_type == "SSN":
             # Use SSN optimizer for outer weights only
             output_params = [self.net.output.weight]
-            self.optimizer = SSN(output_params, alpha=self.alpha, gamma=self.gamma)
-            logger.info(f"Using SSN optimizer with alpha={self.alpha}, gamma={self.gamma}")
+            self.optimizer = SSN(output_params, alpha=self.alpha, gamma=self.gamma, th=self.th)
+            if self.verbose:
+                logger.info(f"Using SSN optimizer with alpha={self.alpha}, gamma={self.gamma}, th={self.th}")
         elif self.optimizer_type == "SSN_TR":
             # Use SSN_TR optimizer for outer weights only
             output_params = [self.net.output.weight]
-            self.optimizer = SSN_TR(output_params, alpha=self.alpha, gamma=self.gamma)
-            logger.info(f"Using SSN_TR optimizer with alpha={self.alpha}, gamma={self.gamma}")
+            self.optimizer = SSN_TR(output_params, alpha=self.alpha, gamma=self.gamma, th=self.th)
+            if self.verbose:
+                logger.info(f"Using SSN_TR optimizer with alpha={self.alpha}, gamma={self.gamma}, th={self.th}")
         elif self.optimizer_type == "Adam" or self.optimizer_type is None:
             # Use Adam optimizer for outer weights only
-            self.optimizer = torch.optim.Adam([self.net.output.weight], lr=0.0001)
-            logger.info("Using Adam optimizer with lr=0.0001 (outer weights only)")
+            self.optimizer = torch.optim.Adam([self.net.output.weight], lr=0.01)
+            if self.verbose:
+                logger.info("Using Adam optimizer with lr=0.01 (outer weights only)")
         else:
             raise ValueError(f"Unsupported optimizer: {self.optimizer_type}. Use 'Adam' or 'SSN'.")
         
     def _phi(self, t):
         """
         Non-convex penalty function phi(t) for gamma > 0.
-        th = 0: the L1 penalty
-        th = 1: the full noncovex penalty
+        th = 0: the full nonconvex penalty
+        th = 1: the L1 penalty
         """
         th = self.th
-        gam = self.gamma / (1 - th)  # = 2*gamma
-        return th * t + (1 - th) * torch.log(1 + gam * t) / gam
+        if th == 1:
+            return t
+        else:
+            gam = self.gamma / (1 - th)  # = 2*gamma
+            return th * t + (1 - th) * torch.log(1 + gam * t) / gam
     
     def _compute_loss(self, x_input, target_v, target_dv):
         """
@@ -248,7 +262,8 @@ class model_outerweights:
         Returns:
             Tuple of (model_wrapper, weight, bias, output_weight)
         """
-        logger.info("Starting network training session (outer weights only)")
+        if self.verbose:
+            logger.info("Starting network training session (outer weights only)")
         
         # Prepare data
         train_tensors, valid_tensors = self._prepare_data(self.data)
@@ -264,10 +279,10 @@ class model_outerweights:
         root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         model_save_path = os.path.join(root_dir, "train_history")
         os.makedirs(model_save_path, exist_ok=True)
-        logger.info(f"Training model, saving to {model_save_path}")
-        
-        logger.info(f"Training hyperparameters: iterations={iterations}, batch_size={batch_size}, display_every={display_every}")
-        logger.info(f"Loss weights: value={self.loss_weights[0]}, gradient={self.loss_weights[1]}")
+        if self.verbose:
+            logger.info(f"Training model, saving to {model_save_path}")
+            logger.info(f"Training hyperparameters: iterations={iterations}, batch_size={batch_size}, display_every={display_every}")
+            logger.info(f"Loss weights: value={self.loss_weights[0]}, gradient={self.loss_weights[1]}")
         
         # Reset loss history
         self.loss_history = {'train_loss': [], 'val_loss': [], 'value_loss': [], 'grad_loss': []}
@@ -311,8 +326,9 @@ class model_outerweights:
                     valid_x_tensor, valid_v_tensor, valid_dv_tensor
                 )
                 
-                logger.info(f"Epoch {epoch}: Train Loss = {loss.item():.6f}, "
-                           f"Val Loss = {val_loss.item():.6f}")
+                if self.verbose:
+                    logger.info(f"Epoch {epoch}: Train Loss = {loss.item():.6f}, "
+                               f"Val Loss = {val_loss.item():.6f}")
                 
                 self.loss_history['train_loss'].append(loss.item())
                 self.loss_history['val_loss'].append(val_loss.item())
@@ -325,7 +341,8 @@ class model_outerweights:
         
         # Save final model
         torch.save(self.net.state_dict(), os.path.join(model_save_path, "model_outerweights_final.pt"))
-        logger.info(f"Final model saved to {os.path.join(model_save_path, 'model_outerweights_final.pt')}")
+        if self.verbose:
+            logger.info(f"Final model saved to {os.path.join(model_save_path, 'model_outerweights_final.pt')}")
         
         # Return results
         weight, bias = self.net.get_hidden_params()
@@ -356,7 +373,8 @@ class model_outerweights:
                         return pred.detach().cpu().numpy()
         
         model_wrapper = ModelWrapper(self.net, self.loss_history, self.loss_weights)
-        logger.info("Training completed successfully (outer weights only)")
+        if self.verbose:
+            logger.info("Training completed successfully (outer weights only)")
         
         return model_wrapper, weight.numpy(), bias.numpy(), outer_weight.numpy()
 

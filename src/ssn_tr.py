@@ -10,6 +10,13 @@ class SSN_TR(SSN):
     Mirrors the MATLAB SSN_TR.m flow while keeping compatibility with SSN API.
     Uses the same proximal and penalty helpers from SSN and a TR-Krylov inner
     solve via mpcg.
+    
+    Args:
+        params (iterable): iterable of parameters to optimize (should be outer weights only)
+        alpha (float): regularization parameter for the penalty function
+        gamma (float): parameter for the non-convex penalty function
+        th (float): interpolation parameter between L1 (th=0) and non-convex (th=1) (default: 0.5)
+        lr (float): mixing parameter between old and new parameters (default: 1.0)
     """
 
     def __init__(self, params, alpha: float, gamma: float, th: float = 0.5, lr: float = 1.0):

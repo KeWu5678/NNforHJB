@@ -68,6 +68,37 @@ def count_small_weights(weights, threshold):
     """Count weights below threshold."""
     return int(np.sum(np.abs(weights.flatten()) < threshold))
 
+def prune_small_weights(weights, biases, outer_weights, threshold):
+    """Prune neurons with small outer weights."""
+    # Debug: print shapes
+    logger.info(f"prune_small_weights - weights: {weights.shape}, biases: {biases.shape}, outer_weights: {outer_weights.shape}")
+    
+    # outer_weights has shape (1, n) from the network, need to extract the n values
+    if outer_weights.ndim == 2 and outer_weights.shape[0] == 1:
+        outer_weights_flat = outer_weights[0, :]  # Extract the (n,) array
+    else:
+        outer_weights_flat = outer_weights.flatten()
+    
+    # Find indices of neurons with outer weights above threshold
+    keep_mask = np.abs(outer_weights_flat) >= threshold
+    
+    if np.sum(keep_mask) < len(weights):
+        logger.info(f"Pruning {len(weights) - np.sum(keep_mask)} neurons with small weights")
+    
+    # Keep only neurons above threshold
+    weights_pruned = weights[keep_mask]
+    biases_pruned = biases[keep_mask]
+    
+    # Handle outer_weights shape properly - maintain the (1, n) shape
+    if outer_weights.ndim == 2 and outer_weights.shape[0] == 1:
+        outer_weights_pruned = outer_weights[:, keep_mask]  # Keep (1, n_pruned) shape
+    else:
+        outer_weights_pruned = outer_weights[keep_mask]
+    
+    logger.info(f"After pruning - weights: {weights_pruned.shape}, biases: {biases_pruned.shape}, outer_weights: {outer_weights_pruned.shape}")
+    
+    return weights_pruned, biases_pruned, outer_weights_pruned
+
 def run_training_with_logging(data, model_1, model_2, model_result, weight_raw, bias_raw, outerweight_raw,
                             num_iterations, M, alpha, pruning_threshold, power, gamma):
     """
@@ -91,40 +122,61 @@ def run_training_with_logging(data, model_1, model_2, model_result, weight_raw, 
     training_logger = TrainingLogger(project_root)
     training_logger.set_hyperparameters('relu', power, gamma, alpha)
     
+    # Track best model across all iterations
+    best_val_loss = float('inf')
+    best_weights = None
+    best_biases = None
+    best_outer_weights = None
+    
     # Training loop
     for i in range(num_iterations - 1):
         logger.info(f"Iteration {i} - weights shape: {weight_raw.shape}")
         
         # Train outer weights
         model, weight, bias, outerweights = model_2.train(
-            iterations=1000,
+            iterations=5000,
             display_every=1000,
             inner_weights=weight_raw,
             inner_bias=bias_raw, 
             outer_weights=outerweight_raw
         )
         
-        # Count pruned neurons
+        # Count and prune small weights
         small_count = count_small_weights(outerweight_raw, pruning_threshold)
         logger.info(f"Small weights count: {small_count}")
         
+        # Actually prune neurons with small weights
+        weight_pruned, bias_pruned, outerweight_pruned = prune_small_weights(
+            weight, bias, outerweights, pruning_threshold
+        )
+        
         # Insert neurons
         weight_temp, bias_temp = insertion(data, model_result, M, alpha)
-        weights = np.concatenate((weight, weight_temp), axis=0)
-        biases = np.concatenate((bias, bias_temp), axis=0)
+        weights = np.concatenate((weight_pruned, weight_temp), axis=0)
+        biases = np.concatenate((bias_pruned, bias_temp), axis=0)
         
-        # Train full model
+        # Train full model and track best validation loss
         model_result, weight_raw, bias_raw, outerweight_raw = model_1.train(
             inner_weights=weights,
             inner_bias=biases
         )
         
-        # Log iteration
-        test_loss = extract_test_loss(model_result)
-        training_logger.log_iteration(i, weight_raw, bias_raw, test_loss)
+        # Extract validation loss and check if it's the best so far
+        val_loss = extract_test_loss(model_result)
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            best_weights = weight_raw.copy()
+            best_biases = bias_raw.copy()
+            best_outer_weights = outerweight_raw.copy()
+            logger.info(f"New best model found at iteration {i} with validation loss: {val_loss:.6f}")
+        
+        # Log iteration (but continue using current weights for next iteration)
+        training_logger.log_iteration(i, weight_raw, bias_raw, val_loss)
     
     # Save results
     filepath = training_logger.save()
     logger.info(f"Training completed. History saved to {filepath}")
+    logger.info(f"Best validation loss: {best_val_loss:.6f}")
     
-    return training_logger, weight_raw, bias_raw, outerweight_raw
+    # Return the best model instead of the final one
+    return training_logger, best_weights, best_biases, best_outer_weights

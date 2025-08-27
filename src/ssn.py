@@ -53,24 +53,36 @@ class SSN(Optimizer):
     def _phi(self, t):
         """
         Non-convex penalty function phi(t) for gamma > 0.
-        th = 0: the L1 penalty
-        th = 1: the full noncovex penalty
+        th = 0: the full nonconvex penalty
+        th = 1: the L1 penalty
         """
         th = self.th
-        gam = self.gamma / (1 - th)  # = 2*gamma
-        return th * t + (1 - th) * torch.log(1 + gam * t) / gam
+        if th == 1:
+            return t
+        else:
+            gam = self.gamma / (1 - th)  # = 2*gamma
+            return th * t + (1 - th) * torch.log(1 + gam * t) / gam
     
     def _dphi(self, t):
         """Derivative of penalty function."""
         th = self.th
-        gam = self.gamma / (1 - th)
-        return th + (1 - th) / (1 + gam * t)
+        if th == 1:
+            return torch.ones_like(t)
+        else:
+            gam = self.gamma / (1 - th)
+            return th + (1 - th) / (1 + gam * t)
     
     def _ddphi(self, t):
         """Second derivative of penalty function."""
         th = self.th
-        gam = self.gamma / (1 - th)
-        return -(1 - th) * gam / ((1 + gam * t) ** 2)
+        if th == 1:
+            return torch.zeros_like(t)
+        else:
+            # Safeguard against th very close to 1
+            if abs(1 - th) < 1e-8:
+                return torch.zeros_like(t)
+            gam = self.gamma / (1 - th)
+            return -(1 - th) * gam / ((1 + gam * t) ** 2)
     
     def _compute_prox(self, v, mu):
         """Compute the soft thresholding operator for scalar sparsity.
