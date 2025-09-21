@@ -4,6 +4,112 @@ from numpy.polynomial.chebyshev import Chebyshev
 from scipy.spatial import KDTree
 import torch
 
+def _phi(t, th, gamma):
+    """
+    Non-convex penalty function phi(t) for gamma > 0.
+    th = 0: the full nonconvex penalty
+    th = 1: the L1 penalty
+    """
+    if th == 1:
+        return t
+    else:
+        # Safeguard against th very close to 1
+        if abs(1 - th) < 1e-8:
+            return t
+        gam = gamma / (1 - th)  # = 2*gamma
+        return th * t + (1 - th) * torch.log(1 + gam * t) / gam
+
+def _dphi(t, th, gamma):
+    """Derivative of penalty function."""
+    if th == 1:
+        return torch.ones_like(t)
+    else:
+        gam = gamma / (1 - th)
+        return th + (1 - th) / (1 + gam * t)
+
+def _ddphi(t, th, gamma):
+    """Second derivative of penalty function."""
+    if th == 1:
+        return torch.zeros_like(t)
+    else:
+        # Safeguard against th very close to 1
+        if abs(1 - th) < 1e-8:
+            return torch.zeros_like(t)
+        gam = gamma / (1 - th)
+        return -(1 - th) * gam / ((1 + gam * t) ** 2)
+
+def _compute_prox(v, mu):
+    """Compute the soft thresholding operator
+    Args:
+        v: input vector
+        mu: regularization parameter
+    Returns:
+        vprox: proximal operator result
+    """
+    normsv = torch.abs(v)
+
+    # Safeguard against division by zero
+    eps = torch.finfo(v.dtype).eps
+    normsv_safe = torch.clamp(normsv, min=(mu + eps) * eps)
+    
+    # Apply scalar soft shrinkage operator
+    # vprox = max(0, 1 - mu / |v|) * v for each element
+    shrinkage_factor = torch.clamp(1 - mu / normsv_safe, min=0)
+    vprox = shrinkage_factor * v
+    
+    return vprox
+
+def _compute_dprox(v, mu):
+    """Compute the derivative of the proximal operator
+    
+    Args:
+        v: the vector-valued parameter
+        mu: proximal parameter
+        
+    Returns:
+        DP: derivative matrix of the proximal operator (diagonal)
+    """
+    # Ensure input is real
+    assert torch.is_floating_point(v), "Input must be real-valued"
+    
+    # For scalar sparsity (N=1), each element is its own group
+    # normsv = abs(v) for each element
+    normsv = torch.abs(v)
+    
+    # Safeguard against division by zero
+    eps = torch.finfo(v.dtype).eps
+    normsv_safe = torch.clamp(normsv, min=(mu + eps) * eps)
+    
+    # First term: max(0, 1 - mu / normsv_safe)
+    diagonal_term = torch.clamp(1 - mu / normsv_safe, min=0)
+    
+    # Second term: (normsv >= mu) * mu / (normsv_safe^3) * v^2
+    mask = normsv >= mu
+    outer_product_term = mask.float() * mu / (normsv_safe ** 3) * (v ** 2)
+
+    # Create diagonal matrix
+    DP = torch.diag(diagonal_term + outer_product_term)
+    
+    return DP
+
+def stereo(z):
+    """
+    The function transform a point in Rd in Sd:
+    Input:
+    z:  (2, n) np.array
+    Return:  
+    shape: (2, n), (1, n)
+    """ 
+    #A = (2 * Z) / (1 + np.sum(Z**2, axis=1)).reshape(-1, 1) #shape = (N, 2)
+    #B = (1 - np.sum(Z**2, axis=1)).reshape(-1, 1) / (1 + np.sum(Z**2, axis=1)).reshape(-1, 1) # shape = (N, 1)
+    if z.shape[0] != 2:
+        raise ValueError("z must be a (2, n) np.array")
+    denominator = (1 + np.sum(z**2, axis=0)).reshape(1, -1)
+    return [
+        (2 * z) / denominator, 
+        (1 - np.sum(z**2, axis=0)) / denominator
+        ]
+
 def gen(identifier, coeffs, geom):
     """
     args:
@@ -31,8 +137,7 @@ def project(identifier, geom_old, geom_new, f_old):
     """
     if identifier == "pw":
         f_new = np.interp(geom_new, geom_old, f_old)
-        return f_new
-    
+        return f_new  
 
 def L2(grid, x):
     """

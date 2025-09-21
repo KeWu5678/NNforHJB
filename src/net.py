@@ -10,34 +10,44 @@ class ShallowNetwork(nn.Module):
     Args:
         layer_sizes (list): [input_dim, hidden_dim, output_dim] 
         activation: activation function (torch.nn functional)
-        kernel_initializer: weight initialization method
+        initializer: weight initialization method
         p (float): power for activation function (default: 2)
         inner_weights (array, optional): pre-defined hidden weights
         inner_bias (array, optional): pre-defined hidden bias
         regularization (tuple, optional): regularization parameters
     """
     
-    def __init__(self, layer_sizes, activation, kernel_initializer="xavier_uniform", 
-                 p=2, inner_weights=None, inner_bias=None):
+    def __init__(
+        self, 
+        layer_sizes, 
+        activation, 
+        p=2,
+        initializer="xavier_uniform_", 
+        inner_weights=None, inner_bias=None, outer_weights=None,
+        ):
         super().__init__()
-        
+
         if len(layer_sizes) != 3:
             raise ValueError("This is not a shallow net! layer_sizes must have 3 elements.")
-        
+
         # Store parameters
         self.p = p
-            
-        # Use activation function directly
         self.activation = activation
+        # Resolve initializer: allow passing full function name with trailing underscore
+        # e.g., "xavier_uniform_" or a callable. Default to xavier_uniform_.
+        if isinstance(initializer, str):
+            self.initializer = getattr(nn.init, initializer, nn.init.xavier_uniform_)
+        else:
+            self.initializer = initializer
         
         # Create hidden layer
         self.hidden = nn.Linear(layer_sizes[0], layer_sizes[1])
         
         # Initialize or set inner weights/bias
         if inner_weights is None or inner_bias is None:
-            # Initialize with zeros (matching original behavior)
-            nn.init.zeros_(self.hidden.weight)
-            nn.init.zeros_(self.hidden.bias)
+            # Initialize hidden weights; bias 
+            self.initializer(self.hidden.weight)
+            nn.init.uniform_(self.hidden.bias, -0.1, 0.1)
         else:
             # Delete existing parameters and set custom ones
             del self.hidden.weight
@@ -57,14 +67,16 @@ class ShallowNetwork(nn.Module):
         self.output = nn.Linear(layer_sizes[1], layer_sizes[2])
         
         # Initialize output weights
-        if kernel_initializer == "xavier_uniform":
-            nn.init.xavier_uniform_(self.output.weight)
-        elif kernel_initializer == "zeros":
-            nn.init.zeros_(self.output.weight)
+        if outer_weights is None:
+            self.initializer(self.output.weight)
         else:
-            nn.init.xavier_uniform_(self.output.weight)  # default
-        
-        # Initialize output bias to zero and freeze it
+            if isinstance(outer_weights, np.ndarray):
+                outer_weights = torch.tensor(outer_weights, dtype=torch.float64)
+            with torch.no_grad():
+                # Copy provided weights into existing parameter
+                self.output.weight.copy_(outer_weights)
+
+        # the output bias is set to zero and not trainable         
         nn.init.zeros_(self.output.bias)
         self.output.bias.requires_grad = False
         
@@ -90,11 +102,3 @@ class ShallowNetwork(nn.Module):
         # Output layer
         output = self.output(hidden_activated)
         return output, hidden_activated
-    
-    def get_hidden_params(self):
-        """Return the parameters of the hidden layer."""
-        return self.hidden.weight.detach().clone(), self.hidden.bias.detach().clone()
-        
-    def get_output_params(self):
-        """Return the parameters of the output layer."""
-        return self.output.weight.detach().clone() 

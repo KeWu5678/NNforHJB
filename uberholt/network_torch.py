@@ -366,7 +366,8 @@ def network(data, power, regularization = None, inner_weights=None, inner_bias=N
     )
     
     # Get weights and biases from the trained model
-    weight, bias = model.net.get_hidden_params()
+    weight = model.net.hidden.weight.detach()
+    bias = model.net.hidden.bias.detach()
     return model, weight.cpu().numpy(), bias.cpu().numpy()
 
 

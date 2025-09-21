@@ -2,6 +2,7 @@ import torch
 from loguru import logger
 from .mpcg import mpcg
 from .ssn import SSN
+from .utils import _compute_prox, _compute_dprox
 
 
 class SSN_TR(SSN):
@@ -39,12 +40,12 @@ class SSN_TR(SSN):
         # Prepare quantities
         q = self._transform_param2q(params, loss)
         Gq = self._Gradient(q, params, loss)
-        DP = self._compute_dprox(q, self.alpha / self.c)
+        DP = _compute_dprox(q, self.alpha / self.c)
 
         # Build DG using the same Hessian routine as SSN for consistency
         DG = self._Hessian(q, params, loss)
 
-        # Krylov/TR step
+        # Krylov/TR step: 
         I_active = torch.diag(DP) != 0
         kmaxit = max(1, int(2 * I_active.sum().item()))
         
@@ -52,7 +53,7 @@ class SSN_TR(SSN):
 
         # Tentative update and trust-region ratio
         qnew = q + dq
-        unew = self._compute_prox(qnew, self.alpha / self.c)
+        unew = _compute_prox(qnew, self.alpha / self.c)
         self._set_params_from_flat(unew)
         loss_new = closure()
 

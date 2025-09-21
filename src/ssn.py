@@ -2,6 +2,7 @@ import torch
 from torch.optim import Optimizer
 import numpy as np
 from loguru import logger
+from .utils import _phi, _dphi, _ddphi, _compute_prox, _compute_dprox
 
 # This is a standalone SSN optimizer that doesn't depend on deepxde
 
@@ -28,7 +29,7 @@ class SSN(Optimizer):
         alpha,
         gamma,
         th=0.5,
-        lr=1.0,
+        lr=0.01,
     ):
         # Learning rate should be passed to the superclass optimizer
         defaults = {"lr": lr}
@@ -42,106 +43,18 @@ class SSN(Optimizer):
         self.gamma = gamma
         self.th = th
         
-        # SSN constant
+        # SSN constant, lambda in the proximal operator
         self.c = 1 + alpha * gamma
         
         self.q = None  # preimage of outer weights w.r.t. the proximal operator
         self.n_iters = 0    # Number of SSN iterations
         self.consecutive_failures = 0
         self.hidden_activations = None  # Store S matrix for Hessian
-        
-    def _phi(self, t):
-        """
-        Non-convex penalty function phi(t) for gamma > 0.
-        th = 0: the full nonconvex penalty
-        th = 1: the L1 penalty
-        """
-        th = self.th
-        if th == 1:
-            return t
-        else:
-            gam = self.gamma / (1 - th)  # = 2*gamma
-            return th * t + (1 - th) * torch.log(1 + gam * t) / gam
-    
-    def _dphi(self, t):
-        """Derivative of penalty function."""
-        th = self.th
-        if th == 1:
-            return torch.ones_like(t)
-        else:
-            gam = self.gamma / (1 - th)
-            return th + (1 - th) / (1 + gam * t)
-    
-    def _ddphi(self, t):
-        """Second derivative of penalty function."""
-        th = self.th
-        if th == 1:
-            return torch.zeros_like(t)
-        else:
-            # Safeguard against th very close to 1
-            if abs(1 - th) < 1e-8:
-                return torch.zeros_like(t)
-            gam = self.gamma / (1 - th)
-            return -(1 - th) * gam / ((1 + gam * t) ** 2)
-    
-    def _compute_prox(self, v, mu):
-        """Compute the soft thresholding operator for scalar sparsity.
-        Args:
-            v: input vector
-            mu: regularization parameter
-        Returns:
-            vprox: proximal operator result
-        """
-        normsv = torch.abs(v)
-
-        # Safeguard against division by zero
-        eps = torch.finfo(v.dtype).eps
-        normsv_safe = torch.clamp(normsv, min=(mu + eps) * eps)
-        
-        # Apply scalar soft shrinkage operator
-        # vprox = max(0, 1 - mu / |v|) * v for each element
-        shrinkage_factor = torch.clamp(1 - mu / normsv_safe, min=0)
-        vprox = shrinkage_factor * v
-        
-        return vprox
-    
-    def _compute_dprox(self, v, mu):
-        """Compute the derivative of the proximal operator for scalar sparsity.
-        
-        Args:
-            v: the vector-valued parameter
-            mu: proximal parameter
-            
-        Returns:
-            DP: derivative matrix of the proximal operator (diagonal)
-        """
-        # Ensure input is real
-        assert torch.is_floating_point(v), "Input must be real-valued"
-        
-        # For scalar sparsity (N=1), each element is its own group
-        # normsv = abs(v) for each element
-        normsv = torch.abs(v)
-        
-        # Safeguard against division by zero
-        eps = torch.finfo(v.dtype).eps
-        normsv_safe = torch.clamp(normsv, min=(mu + eps) * eps)
-        
-        # First term: max(0, 1 - mu / normsv_safe)
-        diagonal_term = torch.clamp(1 - mu / normsv_safe, min=0)
-        
-        # Second term: (normsv >= mu) * mu / (normsv_safe^3) * v^2
-        mask = normsv >= mu
-        outer_product_term = mask.float() * mu / (normsv_safe ** 3) * (v ** 2)
-
-        # Create diagonal matrix
-        DP = torch.diag(diagonal_term + outer_product_term)
-        
-        return DP
     
     def _Gradient(self, q, params, loss):
         # - params: the outer weights
         # - q: preimage of u w.r.t. the proximal operator
-        D_nonconvex = torch.sign(params) * (self._ddphi(torch.abs(params)) - 1)
+        D_nonconvex = torch.sign(params) * (_ddphi(torch.abs(params), self.th, self.gamma) - 1)
         try:
             grad_loss = torch.autograd.grad(loss, self.param_groups[0]["params"], create_graph=True, retain_graph=True)
             grad_flat = torch.cat([g.view(-1) for g in grad_loss])
@@ -151,8 +64,8 @@ class SSN(Optimizer):
         return self.c * (q - params) + self.alpha * D_nonconvex + grad_flat
 
     def _Hessian(self, q, params, loss):
-        DD_nonconvex = self._ddphi(torch.abs(params))
-        DPc = self._compute_dprox(q, self.alpha / self.c)
+        DD_nonconvex = _ddphi(torch.abs(params), self.th, self.gamma)
+        DPc = _compute_dprox(q, self.alpha / self.c)
         I = torch.eye(params.shape[0], device=params.device, dtype=params.dtype)
         
         # Use correct Gauss-Newton Hessian: S^T * S * DPc
@@ -182,7 +95,6 @@ class SSN(Optimizer):
         if not loss.requires_grad:
             logger.warning("Loss tensor does not require gradients - SSN may not work properly")
             return params.clone()
-            
         try:
             grad_loss = torch.autograd.grad(loss, self.param_groups[0]["params"], create_graph=True, retain_graph=True)
             grad_flat = torch.cat([g.view(-1) for g in grad_loss])
@@ -191,7 +103,7 @@ class SSN(Optimizer):
             logger.error(f"Failed to compute gradients: {e}")
             return params.clone()
             
-        return params - (1 / self.c) * (self.alpha * torch.sign(params) * (self._ddphi(torch.abs(params)) - 1) + grad_flat)
+        return params - (1 / self.c) * (self.alpha * torch.sign(params) * (_ddphi(torch.abs(params), self.th, self.gamma) - 1) + grad_flat)
     
     def _update_parameters(self, u_flat):
         """Helper function to update model parameters from flattened tensor."""
@@ -201,9 +113,7 @@ class SSN(Optimizer):
             p.data.copy_(u_flat[start:start + numel].view(p.shape))
             start += numel
     
-    def set_hidden_activations(self, hidden_activations):
-        """Set the hidden activations matrix S for Gauss-Newton Hessian computation."""
-        self.hidden_activations = hidden_activations.detach()  # Don't need gradients for S
+    # Hidden activations are set directly by callers: optimizer.hidden_activations = S.detach()
 
     def step(self, closure):
         """Perform a single optimization step using semismooth Newton method with damping.
@@ -219,7 +129,7 @@ class SSN(Optimizer):
         # Get current loss and parameters
         loss = closure()      
         params = torch.cat([p.view(-1) for p in self.param_groups[0]["params"]])
-        logger.debug(f"Initial loss: {loss.item():.6e}, penalty: {(self.alpha * torch.sum(self._phi(torch.abs(params)))).item():.6e}")
+        # logger.debug(f"Initial loss: {loss.item():.6e}, penalty: {(self.alpha * torch.sum(self._phi(torch.abs(params)))).item():.6e}")
         
         # Initialize q
         q = self._transform_param2q(params, loss)  # Pass loss instead of loss for gradient computation
@@ -227,37 +137,6 @@ class SSN(Optimizer):
         Gq = self._Gradient(q, params, loss)    
         DG = self._Hessian(q, params, loss)
         grad_norm = torch.norm(Gq).item()
-        # logger.info(f"Gradient norm: {grad_norm:.6e}")
-        
-        # if grad_norm < 1e-12:
-        #     logger.warning("Gradient norm is extremely small - may indicate convergence or gradient computation issues")
-        #     return loss
-        # # Log detailed Hessian information
-        # hessian_min = DG.min().item()
-        # hessian_max = DG.max().item()
-        # hessian_det = torch.det(DG).item() if DG.shape[0] <= 10 else "N/A (too large)"
-        # hessian_cond = torch.linalg.cond(DG).item()
-        
-        # logger.info(f"Hessian analysis:")
-        # logger.info(f"  Shape: {DG.shape}")
-        # logger.info(f"  Min eigenvalue: {hessian_min:.6e}")
-        # logger.info(f"  Max eigenvalue: {hessian_max:.6e}")
-        # logger.info(f"  Condition number: {hessian_cond:.2e}")
-        # logger.info(f"  Determinant: {hessian_det}")
-        # logger.info(f"  Contains NaN: {torch.isnan(DG).any().item()}")
-        # logger.info(f"  Contains Inf: {torch.isinf(DG).any().item()}")
-
-        # if hessian_cond > 1e12:
-        #     logger.warning(f"Hessian is ill-conditioned: {hessian_cond:.2e}, adding regularization")
-        #     # Add stronger regularization for ill-conditioned case
-        #     DG = DG + 1e-6 * torch.eye(DG.shape[0], device=DG.device, dtype=DG.dtype)
-        #     hessian_cond_new = torch.linalg.cond(DG).item()
-        #     logger.info(f"After regularization, condition number: {hessian_cond_new:.2e}")
-        
-        # if torch.isnan(DG).any() or torch.isinf(DG).any():
-        #     logger.error("Hessian contains NaN or Inf values - cannot proceed")
-        #     return loss
-        
         I = torch.eye(params.shape[0], device=params.device, dtype=params.dtype)
         theta0_base = 1.0 / (1e-12 * torch.norm(DG, p=float('inf')).item())
         
@@ -276,7 +155,7 @@ class SSN(Optimizer):
         
         # Update outer weights and evaluate new loss
         qnew = q + dq
-        unew = self._compute_prox(qnew, self.alpha / self.c)
+        unew = _compute_prox(qnew, self.alpha / self.c)
         self._update_parameters(unew)
         loss_new = closure()
         
@@ -293,15 +172,7 @@ class SSN(Optimizer):
         iter_ls = 0
         eps_machine = torch.finfo(loss.dtype).eps
         tolerance = 1 + 1000 * eps_machine
-        # logger.info(f"Line search start: loss={loss.item():.6e}, loss_new={loss_new.item():.6e}")
-        # logger.info(f"Tolerance factor: {tolerance:.6e}")
-        # logger.info(f"Line search condition: loss_new > tolerance * loss = {tolerance * loss.item():.6e}")
-        # Add early termination if we already have a good step
         if not torch.isnan(loss_new) and loss_new <= loss.item():
-            # logger.info("Step already provides descent, no line search needed")
-            # descent = loss.item() - loss_new.item()
-            # support = torch.sum(torch.abs(unew) > 1e-8).item()
-            # logger.info(f"Descent: {descent:.6e}, Support: {support}")
             self.n_iters += 1
             return loss
         
@@ -335,7 +206,7 @@ class SSN(Optimizer):
 
             try:
                 qnew = q - torch.linalg.solve(DG + (1/theta) * I, Gq)
-                unew = self._compute_prox(qnew, self.alpha / self.c)
+                unew = _compute_prox(qnew, self.alpha / self.c)
                 self._update_parameters(unew)
                 loss_new = closure()
                 theta = theta / 4.0 
@@ -365,15 +236,7 @@ class SSN(Optimizer):
             # Restore original parameters
             self._update_parameters(params)
             return loss
-        
-        # Successful step - parameters are already updated
-        # descent = loss.item() - loss_new.item()
-        # support = torch.sum(torch.abs(unew) > 1e-8).item()
-        
-        # logger.info(f"Line search successful: {iter_ls} iterations, descent: {descent:.6e}")
-        # logger.info(f"Support: {support}, damping ratio: {theta/theta0:.2e}")
-        
-        # Reset failure counter on success
+
         self.consecutive_failures = 0
         self.n_iters += 1
         return loss
