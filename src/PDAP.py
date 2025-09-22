@@ -5,13 +5,8 @@ Simple training logger for VDP_Testing notebook
 
 import numpy as np
 from loguru import logger
-from .greedy_insertion import insertion
-from src.greedy_insertion import _sample_uniform_sphere_points
+from src.greedy_insertion import _sample_uniform_sphere_points, insertion
 
-
-def count_small_weights(weights, threshold):
-    """Count weights below threshold."""
-    return int(np.sum(np.abs(weights.flatten()) < threshold))
 
 
 def prune_small_weights(weights, biases, outer_weights, threshold):
@@ -59,16 +54,24 @@ def retrain(data_train, data_valid, model_1, model_2, num_iterations, M, thresho
     for i in range(num_iterations):
         logger.info(f"Iteration {i} - Starting...")
         W_hidden, b_hidden = _sample_uniform_sphere_points(M)
-        model_1.train(data_train, data_valid, inner_weights=W_hidden, inner_bias=b_hidden)
+        model_1.train(data_train, data_valid, inner_weights=W_hidden, inner_bias=b_hidden, iterations = 100, display_every = 100)
         state_1 = model_1.net.state_dict()
-        W_hidden, b_hidden, W_out = state_1['hidden.weight'], state_1['hidden.bias'], state_1['output.weight']
-        model_2.train(data_train, data_valid, inner_weights=W_hidden, inner_bias=b_hidden, outer_weights=W_out)
+        W_hidden, b_hidden, W_out = state_1['hidden.weight'].detach().cpu().numpy(), state_1['hidden.bias'].detach().cpu().numpy(), state_1['output.weight'].detach().cpu().numpy()
+        model_2.train(data_train, data_valid, inner_weights=W_hidden, inner_bias=b_hidden, outer_weights=W_out, iterations = 100, display_every = 100)
         
         # Count and prune small weights
         state_2 = model_2.net.state_dict()
-        small_count = np.sum(np.abs(state_2['output.weight'].flatten()) < threshold)
+        # Use torch-native ops to count small weights, then convert to int for logging
+        small_mask = (state_2['output.weight'].abs().flatten() < threshold)
+        small_count = int(small_mask.sum().item())
         logger.info(f"Small weights count: {small_count}, Pruning...")
-        W_hidden, b_hidden = prune_small_weights(W_hidden, b_hidden, W_out, threshold)
+        # Prune neurons based on the trained outer weights from model_2
+        W_hidden, b_hidden, _ = prune_small_weights(
+            W_hidden,
+            b_hidden,
+            state_2['output.weight'].detach().cpu().numpy(),
+            threshold,
+        )
         
         logger.info(f"Recording...")
         record = {'iteration': int(i), 'artifact': model_2.config, 'num_neurons': W_hidden.shape[0]}
@@ -83,8 +86,5 @@ def retrain(data_train, data_valid, model_1, model_2, num_iterations, M, thresho
         W_hidden = np.concatenate((W_hidden, W_to_insert), axis=0)
         b_hidden = np.concatenate((b_hidden, b_to_insert), axis=0)
         
-
-    
-    
     # Return the best model instead of the final one
     return best_iteration, history

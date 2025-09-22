@@ -29,7 +29,7 @@ def _sample_uniform_sphere_points(N):
     # Return a.T for weights (N, 2) and b.squeeze() for bias (N,)
     return a.T, b.squeeze()
 
-def insertion(data, model, N, alpha):
+def insertion(data_train, model, N, alpha):
     """
     Insert N neurons that 
     Args:
@@ -42,32 +42,49 @@ def insertion(data, model, N, alpha):
     """
 
     def p(z):
-        """z is give as (2, 0)"""
+        """Objective used in greedy insertion; z has shape (2,)"""
         z = z.reshape(2, 1)
-        a, b = stereo(z) # shape = (2, 1), (1, 1)
-        
-        v_pred = model.predict(X_train) # shape = (K, 1)
-        dV_pred = model.predict(
-            X_train, 
-            operator=lambda inputs, outputs: torch.autograd.grad(
-                outputs.sum(), inputs, create_graph=True, retain_graph=True)[0],
-        ) # shape = (K, 2)
+        a, b = stereo(z)  # (2,1), (1,1)
 
+        # Predict with PyTorch
+        X = torch.tensor(X_train, dtype=torch.float64, requires_grad=True)
+        model.net.eval()
+        pred_v = model.net(X)  # (K,1)
+        pred_dv = torch.autograd.grad(pred_v.sum(), X, create_graph=False, retain_graph=False)[0]  # (K,2)
+
+        v_pred = pred_v.detach().cpu().numpy()
+        dV_pred = pred_dv.detach().cpu().numpy()
+
+        # Kernel terms
         activation_fn = model.net.activation
-        pre_activation = torch.as_tensor(X_train @ a + b)
-        kernel = activation_fn(pre_activation).detach().cpu().numpy()  # shape = (K, 1)
-        multi_kernel = np.repeat(power * (kernel ** (power - 1)), 2, axis=1) # shape = (K, 2)
-        
-        coeff = (dV_pred - dV_train) * a.T.repeat(K, axis=0) # shape = (K, 2)
+        pre_activation = torch.tensor(X_train @ a + b, dtype=torch.float64)
+        kernel = activation_fn(pre_activation).detach().cpu().numpy()  # (K,1)
+        multi_kernel = np.repeat(power * (kernel ** (power - 1)), 2, axis=1)  # (K,2)
 
-        result = (model.losss_weights[0] + model.loss_weights[1]) * np.sum(kernel ** power * (v_pred - V_train), axis=0)
-        + model.loss_weights[1] * np.sum(coeff * multi_kernel)
+        coeff = (dV_pred - dV_train) * a.T.repeat(K, axis=0)  # (K,2)
+
+        result = (
+            (model.loss_weights[0] + model.loss_weights[1]) * np.sum((kernel ** power) * (v_pred - V_train), axis=0)
+            + model.loss_weights[1] * np.sum(coeff * multi_kernel)
+        )
 
         return result
         
 
-    # Get the data first
-    X_train, V_train, dV_train = data["x"], data["v"], data["dv"]
+    # Get the data first (handle dict or tuple; tensors or arrays)
+    if isinstance(data_train, dict):
+        X_train, V_train, dV_train = data_train["x"], data_train["v"], data_train["dv"]
+    else:
+        X_train, V_train, dV_train = data_train  # expected: (x, v, dv)
+
+    # If torch tensors, detach to numpy for SciPy and NumPy ops below
+    if hasattr(X_train, "detach"):
+        X_train = X_train.detach().cpu().numpy()
+    if hasattr(V_train, "detach"):
+        V_train = V_train.detach().cpu().numpy()
+    if hasattr(dV_train, "detach"):
+        dV_train = dV_train.detach().cpu().numpy()
+
     V_train = V_train.reshape(-1, 1)
     K = len(X_train)
     power = model.power
