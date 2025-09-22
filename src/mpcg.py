@@ -19,8 +19,10 @@ def _apply_op(op: Optional[TensorOrOp], v: torch.Tensor) -> torch.Tensor:
 
 
 def _to_boundary(x: torch.Tensor, d: torch.Tensor, s: float) -> tuple[torch.Tensor, float]:
-    """Project x + tau d to the trust-region boundary |x| = s by solving for tau.
-
+    """
+    the trust-region boundary projection: Project x + tau d to the trust-region boundary |x| = s by solving for tau.
+    In the algorithm, we should have
+    |x| <= s, |x + tau d| <= s
     This matches the MATLAB helper to_boundary in mpcg.m.
     Returns the updated x and the step length tau used.
     """
@@ -51,8 +53,8 @@ def mpcg(
     Mirrors the MATLAB implementation mpcg.m.
 
     Args:
-        H: Linear operator or matrix for the (approximate) Hessian.
-        b: Right-hand side vector.
+        H: (approximated) Hessian.
+        b: ( - gradient f) Right-hand side vector.
         rtol: Relative tolerance.
         maxit: Maximum inner iterations.
         sigma: Trust-region radius (<= 0 disables TR handling).
@@ -71,19 +73,20 @@ def mpcg(
     x = torch.zeros_like(b)
 
     # r(x) = b - H x, start with x = 0
-    r = b.clone()
+    r = b.clone() 
     z = r.clone()
     DPz = _apply_op(DP, z)
     resres = torch.dot(r, DPz)
 
+    # clone of the iterates and preconditioned iterates
     d = z.clone()
     DPd = DPz.clone()
 
     # Residuals
-    res0 = torch.sqrt(torch.clamp(resres, min=0.0))
-    fres0 = torch.sqrt(torch.dot(r, r))
-    epseps = -0.0
-    pred = -0.0
+    res0 = torch.sqrt(torch.clamp(resres, min=0.0)) # projected residual
+    fres0 = torch.sqrt(torch.dot(r, r)) # full residual
+    epseps = -0.0 # current step decrease in the functional j(x) = (1/2) * DP(x)' * H(x) - DP(x)' * b
+    pred = -0.0 # predicted overall decrease in the model
 
     iters = 0
     flag = 'convgd'

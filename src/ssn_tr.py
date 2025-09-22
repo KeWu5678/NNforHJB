@@ -40,7 +40,7 @@ class SSN_TR(SSN):
         # Prepare quantities
         q = self._transform_param2q(params, loss)
         Gq = self._Gradient(q, params, loss)
-        DP = _compute_dprox(q, self.alpha / self.c)
+        DP = _compute_dprox(q, self.alpha / self.c) 
 
         # Build DG using the same Hessian routine as SSN for consistency
         DG = self._Hessian(q, params, loss)
@@ -49,7 +49,7 @@ class SSN_TR(SSN):
         I_active = torch.diag(DP) != 0
         kmaxit = max(1, int(2 * I_active.sum().item()))
         
-        dq, flag, pred, relres, iter_cg = mpcg(DG, -Gq, 1e-3, kmaxit, self.sigma, DP)
+        dq, _, pred, _, _ = mpcg(DG, -Gq, 1e-3, kmaxit, self.sigma, DP)
 
         # Tentative update and trust-region ratio
         qnew = q + dq
@@ -80,7 +80,7 @@ class SSN_TR(SSN):
             # keep updated params (already set)
             self.n_iters += 1
             self.consecutive_failures = 0
-            return loss
+            return loss_new
 
 __all__ = ["SSN_TR"]
 

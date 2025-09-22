@@ -83,27 +83,54 @@ class SSN(Optimizer):
         return self.c * (I - DPc) + self.alpha * torch.diag(DD_nonconvex) @ DPc + hessian_data_term
     
     def _transform_param2q(self, params, loss):
-        """Transform parameters to auxiliary variable q.
-        
-        Args:
-            params: the outer weights
-            loss: the loss value (should be a scalar tensor with grad_fn)
-        Returns:
-            q: preimage of u w.r.t. the proximal operator
+        """Compute q from current params following MATLAB SSN.m (lines 47-53).
+
+        gf0 = alpha * Dphima(u) + grad_loss(u), where
+        Dphima(u) = (dphi(|u|) - 1) * sign(u).
+        For nonzero entries of u, set gf0_i = -alpha * sign(u_i).
+        Then q = u - (1/c) * gf0.
         """
-        # Check if loss requires gradients
-        if not loss.requires_grad:
-            logger.warning("Loss tensor does not require gradients - SSN may not work properly")
-            return params.clone()
+        # Compute gradient of data term w.r.t. output weights
         try:
-            grad_loss = torch.autograd.grad(loss, self.param_groups[0]["params"], create_graph=True, retain_graph=True)
+            grad_loss = torch.autograd.grad(
+                loss, self.param_groups[0]["params"], create_graph=True, retain_graph=True
+            )
             grad_flat = torch.cat([g.view(-1) for g in grad_loss])
-            logger.debug(f"Gradient computed successfully, norm: {torch.norm(grad_flat).item():.6e}")
         except Exception as e:
-            logger.error(f"Failed to compute gradients: {e}")
-            return params.clone()
+            logger.error(f"Failed to compute gradients in _transform_param2q: {e}")
+            grad_flat = torch.zeros_like(params)
+
+        # Dphima(u) = (dphi(|u|) - 1) * sign(u)
+        dphi_term = _dphi(torch.abs(params), self.th, self.gamma) - 1.0
+        gf0 = self.alpha * torch.sign(params) * dphi_term + grad_flat
+
+        # Override on nonzero entries: gf0_i = -alpha * sign(u_i)
+        nonzero_mask = torch.abs(params) > 0
+        gf0 = torch.where(nonzero_mask, -self.alpha * torch.sign(params), gf0)
+
+        # q = u - (1/c) * gf0
+        q = params - (1.0 / self.c) * gf0
+        return q
+
+    # def _transform_param2q0(self, params, loss):
+    #     """Transform parameters to auxiliary variable q.
+        
+    #     Args:
+    #         params: the outer weights
+    #         loss: the loss value (should be a scalar tensor with grad_fn)
+    #     Returns:
+    #         q: preimage of u w.r.t. the proximal operator
+    #     """
+    #     # Check if loss requires gradients
+    #     try:
+    #         grad_loss = torch.autograd.grad(loss, self.param_groups[0]["params"], create_graph=True, retain_graph=True)
+    #         grad_flat = torch.cat([g.view(-1) for g in grad_loss])
+    #         logger.debug(f"Gradient computed successfully, norm: {torch.norm(grad_flat).item():.6e}")
+    #     except Exception as e:
+    #         logger.error(f"Failed to compute gradients: {e}")
+    #         return params.clone()
             
-        return params - (1 / self.c) * (self.alpha * torch.sign(params) * (_ddphi(torch.abs(params), self.th, self.gamma) - 1) + grad_flat)
+    #     return params - (1 / self.c) * (grad_flat + self.alpha * torch.sign(params) * (_ddphi(torch.abs(params), self.th, self.gamma)))
     
     def _update_parameters(self, u_flat):
         """Helper function to update model parameters from flattened tensor."""
