@@ -352,30 +352,30 @@ class model:
                 total_loss.backward()
                 self.optimizer.step()
                 loss = total_loss
+
+            # Save running best model
+            # self.net.eval() # set to evaluation mode (though may not be needed)
+            val_loss, val_value_loss, val_grad_loss = self._compute_loss(valid_x_tensor, valid_v_tensor, valid_dv_tensor)
+            if val_loss.item() < best_val_loss:
+                best_val_loss = val_loss.item()
+                best_epoch = epoch
+                best_state = self.net.state_dict()
             
             # Validation loss for logging
             if epoch % display_every == 0:
-                self.net.eval() # set to evaluation mode (though may not be needed)
-                val_loss, val_value_loss, val_grad_loss = self._compute_loss(valid_x_tensor, valid_v_tensor, valid_dv_tensor)
-                
                 if self.verbose:
                     logger.info(f"Epoch {epoch}: Train Loss = {loss.item():.6f}, "f"Val Loss = {val_loss.item():.6f}")
-                
                 self.loss_history['train_loss'].append(loss.item())
                 self.loss_history['val_loss'].append(val_loss.item())
                 self.loss_history['value_loss'].append(val_value_loss.item())
                 self.loss_history['grad_loss'].append(val_grad_loss.item())
-                # Save running best model
-                if val_loss.item() < best_val_loss:
-                    best_val_loss = val_loss.item()
-                    best_epoch = epoch
-                    torch.save(self.net.state_dict(), best_model_path)
+
         
         # Restore the best model before returning and report best loss
-        self.net.load_state_dict(torch.load(best_model_path))
-        logger.info(f"Best validation loss: {best_val_loss:.6f}. Restored best model from {best_model_path}")
+        # self.net.load_state_dict(torch.load(best_model_path))
+        logger.info(f"Best validation loss: {best_val_loss:.6f} at iteration {best_epoch}")
         
-        # Prepare return artifacts
+        # save the artifacts
         self.config = {
             'optimizer': self.optimizer_type,
             'activation': getattr(self.activation, '__name__', str(self.activation)),
@@ -389,6 +389,7 @@ class model:
             'best_val_loss': best_val_loss,
             'loss_history': self.loss_history['train_loss'],
             'val_history': self.loss_history['val_loss'],
+            'best_state_dict': best_state,
         }
 
 

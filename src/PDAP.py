@@ -45,19 +45,19 @@ def retrain(data_train, data_valid, model_1, model_2, num_iterations, M, thresho
     
     history = []
     alpha = model_1.alpha
-    
+
     # Track best model across all iterations
     best_iteration = 0
     best_val_loss = float('inf')
-    
+    W_hidden, b_hidden = _sample_uniform_sphere_points(M)
+
     # Training loop
     for i in range(num_iterations):
         logger.info(f"Iteration {i} - Starting...")
-        W_hidden, b_hidden = _sample_uniform_sphere_points(M)
-        model_1.train(data_train, data_valid, inner_weights=W_hidden, inner_bias=b_hidden, iterations = 100, display_every = 100)
+        model_1.train(data_train, data_valid, inner_weights=W_hidden, inner_bias=b_hidden, iterations = 1000, display_every = 100)
         state_1 = model_1.net.state_dict()
         W_hidden, b_hidden, W_out = state_1['hidden.weight'].detach().cpu().numpy(), state_1['hidden.bias'].detach().cpu().numpy(), state_1['output.weight'].detach().cpu().numpy()
-        model_2.train(data_train, data_valid, inner_weights=W_hidden, inner_bias=b_hidden, outer_weights=W_out, iterations = 100, display_every = 100)
+        model_2.train(data_train, data_valid, inner_weights=W_hidden, inner_bias=b_hidden, outer_weights=W_out, iterations = 1000, display_every = 100)
         
         # Count and prune small weights
         state_2 = model_2.net.state_dict()
@@ -67,7 +67,7 @@ def retrain(data_train, data_valid, model_1, model_2, num_iterations, M, thresho
         logger.info(f"Small weights count: {small_count}, Pruning...")
         # Prune neurons based on the trained outer weights from model_2
         W_hidden, b_hidden, _ = prune_small_weights(
-            W_hidden,
+            W_hidden, 
             b_hidden,
             state_2['output.weight'].detach().cpu().numpy(),
             threshold,
