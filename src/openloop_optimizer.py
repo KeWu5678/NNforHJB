@@ -8,7 +8,7 @@ Created on Tue Dec  3 18:30:52 2024
 
 
 import numpy as np
-from . import utils 
+from src import utils 
 from scipy.integrate import solve_bvp
 import matplotlib.pyplot as plt
 
@@ -34,9 +34,6 @@ class OpenLoopOptimizer:
         self.gradient = gradient
         self.V = V
 
-
-
-
     def sol_BVP(self, u):
         sol = solve_bvp(
             lambda t, y: self.ODE(t, y, u),
@@ -57,15 +54,15 @@ class OpenLoopOptimizer:
         yy = np.dot(y, y)
         
         epsilon = 1e-20  # Prevent division by zero
-        BB1 = sy / (ss + epsilon)
-        BB2 = yy / (sy + epsilon)
-        return BB1, BB2
+        BB1 = ss / (sy + epsilon)
+        BB2 = sy / (yy + epsilon)
+        return BB1, BB2, sy
    
 
     def optimize(self):
         """Run optimization loop"""
         # Initialize
-        num_basis = 30
+        num_basis = 50
         u0_coeff = np.zeros(num_basis)
         u0 = utils.gen_legendre(u0_coeff)
         
@@ -81,155 +78,126 @@ class OpenLoopOptimizer:
         G1 = self.gradient(u1(sol1.x), sol1.y[3,:])
         grid1 = sol1.x
         G1_coeff = utils.fit_legendre(grid1, G1, num_basis)
-        
+
+        # Initial cost at first iterate
+        V1 = self.V(sol1.x, u1(sol1.x), sol1.y[0,:], sol1.y[1,:])
+
         # Initial step size (will be adapted)
         alpha = 0.1
 
         # Optimization loop
         k = 1
         store = True
-        while utils.L2(grid1, G1) >= self.tol and store:
-            # Get BB step sizes with safety checks
-            bb_step = self.BBstep(u0_coeff, u1_coeff, G0_coeff, G1_coeff)
-            
-            # Safely compute step size with checks
-            if k % 2 == 0:
-                if abs(bb_step[0]) > 1e-20 and not np.isnan(bb_step[0]) and not np.isinf(bb_step[0]):
-                    alpha = 1 / bb_step[0]
-                else:
-                    # Fallback if BB step is problematic
-                    alpha = 0.1  # Default safe step size
-            else:
-                if abs(bb_step[1]) > 1e-20 and not np.isnan(bb_step[1]) and not np.isinf(bb_step[1]):
-                    alpha = 1 / bb_step[1]
-                else:
-                    # Fallback if BB step is problematic
-                    alpha = 0.01  # Default safe step size
-            
-            # Bound step size for stability
-            alpha = min(max(alpha, 5e-3), 1000.0)
+        alpha_min, alpha_max = 1e-5, 10.0      # bounds for BB step
+        alpha_default = 0.1
+        ls_beta = 0.5                          # backtracking factor for line search
+        ls_max_iter = 500                      # max line-search iterations per outer iter
+        ls_tol = 1e-2                          # relative tolerance for cost decrease (allows numerical noise)
 
-                
-            # Update coefficients - IMPORTANT: work with coefficients, not function values
-            u_coeff_temp = u1_coeff - alpha * G1_coeff
-            
-            # Save current values before updating
-            u0_coeff, G0_coeff = u1_coeff, G1_coeff
-            
-            # Create new control function with updated coefficients
-            u1 = utils.gen_legendre(u_coeff_temp)
-            u1_coeff = u_coeff_temp  # Store coefficients for next iteration
-            
-            try:
-                # Solve BVP with new control
-                sol1 = self.sol_BVP(u1)
-                grid1 = sol1.x
-                G1 = self.gradient(u1(grid1), sol1.y[3,:])
-                G1_coeff = utils.fit_legendre(grid1, G1, num_basis)
-                
-                # Update iteration counter
-                k += 1
-                print(f" k = {k}")
-                print(f" alpha = {alpha}")
-                print(f" norm G = {utils.L2(sol1.x, G1)}")
-                
-                # Check for numerical instability
-                if np.isnan(utils.L2(sol1.x, G1)) or np.isinf(utils.L2(sol1.x, G1)):
-                    print("Warning: Numerical instability detected. Terminating.")
-                    store = False
+        # NOTE: stopping still uses ||G|| as you had; only LS criterion changed
+        while utils.L2(grid1, G1) >= self.tol and store:
+            # BB step based on coefficients
+            alpha_BB1, alpha_BB2, sy = self.BBstep(u0_coeff, u1_coeff, G0_coeff, G1_coeff)
+
+            # Select BB1 or BB2
+            if k % 2 == 0:
+                alpha_trial = alpha_BB1
+            else:
+                alpha_trial = alpha_BB2
+
+            # Safeguards: reject bad curvature or nonsensical steps
+            if sy <= 0 or alpha_trial <= 0 or np.isnan(alpha_trial) or np.isinf(alpha_trial):
+                alpha = alpha_default
+            else:
+                alpha = np.clip(alpha_trial, alpha_min, alpha_max)
+
+            # ------------------------------------------------------------------
+            # Backtracking line search on COST V 
+            # ------------------------------------------------------------------
+            d_coeff = -G1_coeff          # descent direction in coefficient space
+            alpha_ls = alpha
+            accepted = False
+
+            # previous cost
+            J_prev = V1
+
+            ls_iter = 0
+            while ls_iter < ls_max_iter:
+                # Trial step in coefficient space
+                u_trial_coeff = u1_coeff + alpha_ls * d_coeff
+                u_trial = utils.gen_legendre(u_trial_coeff)
+
+                try:
+                    # Solve BVP with new control
+                    sol_trial = self.sol_BVP(u_trial)
+                    grid_trial = sol_trial.x
+                    G_trial = self.gradient(u_trial(grid_trial), sol_trial.y[3,:])
+                    G_trial_coeff = utils.fit_legendre(grid_trial, G_trial, num_basis)
+
+                    # Compute cost at trial point
+                    V_trial = self.V(grid_trial,
+                                    u_trial(grid_trial),
+                                    sol_trial.y[0,:],
+                                    sol_trial.y[1,:])
+                except Exception as e_ls:
+                    # Treat any BVP failure as a bad step: force alpha shrink
+                    V_trial = np.inf
+
+                # Accept if cost decreased (relative decrease requirement handles numerical noise)
+                if np.isfinite(V_trial) and V_trial <= J_prev * (1 + ls_tol):
+                    accepted = True
                     break
-                    
-            except Exception as e:
-                print(f"Error in iteration {k}: {str(e)}")
+
+                # Otherwise shrink step
+                alpha_ls *= ls_beta
+                if alpha_ls < alpha_min:
+                    break
+                ls_iter += 1
+
+            if not accepted:
+                print("Warning: line search failed to find a decreasing-cost step.")
                 store = False
                 break
-            
+
+            # Accept the line-search result
+            u0_coeff, G0_coeff = u1_coeff, G1_coeff   # previous becomes "old"
+            u1_coeff, G1_coeff = u_trial_coeff, G_trial_coeff
+            u1 = u_trial
+            sol1 = sol_trial
+            grid1 = grid_trial
+            G1 = G_trial
+            V1 = V_trial
+            alpha = alpha_ls
+
+            # Update iteration counter and report
+            k += 1
+            G1_norm = utils.L2(grid1, G1)
+            print(f" k = {k}, alpha = {alpha}, cost = {V1}, norm G = {G1_norm}")
+
+            # Check for numerical instability
+            if np.isnan(G1_norm) or np.isinf(G1_norm) or np.isnan(V1) or np.isinf(V1):
+                print("Warning: Numerical instability detected. Terminating.")
+                store = False
+                break
+
             # Check max iterations
             if k >= self.max_it:
                 store = False
                 print("Maximum iterations reached")
-                print(f" norm G = {utils.L2(sol1.x, G1)}")
+                print(f" norm G = {G1_norm}")
                 break
+
         # Final result
         if store == True:
             p = np.array([
                 sol1.y[2, 0],
                 sol1.y[3, 0]
             ])
-            V = self.V(sol1.x, u1(sol1.x), sol1.y[0,:], sol1.y[1,:])
+            V = V1
             print(f" cost = {V}")
             print(f" norm G = {utils.L2(sol1.x, G1)}")
-
-            # fig = plt.figure(figsize=(10, 8))
-            # ax = fig.add_subplot(111, projection='3d')
-            
-            # # Plot trajectory
-            # t = sol1.x
-            # x = sol1.y[0, :]
-            # y = sol1.y[1, :]
-            # ax.plot(t, x, y, label='Solution Trajectory')
-            
-            # # Labels and title
-            # ax.set_xlabel('t')
-            # ax.set_ylabel('x(t)')
-            # ax.set_zlabel('y(t)')
-            # ax.set_title('Solution Trajectory in Phase Space')
-            
-            # # Add legend
-            # ax.legend()
-            
-            # plt.show()    
             return p, V
         else:
             print("maximum iteration reached")
             return None, None
-    
 
-
-# if __name__ == "__main__":
-#     beta = 2
-#     # ini = np.random.rand(2)
-#     ini = [0.54491032, 0.52831127]
-#     print(f" ini = {ini}")
-
-# def VDP(t, y, u):
-#     """Define the Boundary value problem with control parameter u"""
-#     return np.vstack([
-#         y[1],
-#         -y[0] + y[1] * (1 - y[0] ** 2) + u(t),
-#         -y[3] - 2 * y[0],
-#         2 * y[0] * y[1] * y[2] + y[0] ** 2 * y[3] + y[2] - y[3] - 2 * y[1]
-#     ])
-
-
-# def bc(ya, yb):
-#     """Boundary conditions"""
-    
-#     return np.array([
-#         ya[0] - ini[0],
-#         ya[1] - ini[1],
-#         yb[2],
-#         yb[3]
-#     ])
-
-# def gradient(u, p):
-#     if len(p) != len(u):
-#         raise ValueError("p and u must have the same length")
-#     else:
-#         n = len(p)
-#         grad = np.zeros(n)
-#     for i in range(n):
-#         grad[i] = p[i] + 2 * beta * u[i]
-#     return grad
-
-# def V(grid, u, y1, y2):
-#     return utils.L2(grid, u) * beta + 0.5 * (utils.L2(grid, y1) + utils.L2(grid, y2))
-
-# grid = np.linspace(0, 3, 1000)
-# guess = np.ones((4, grid.size)) 
-# tol = 1e-6
-# max_it = 1000
-# optimizer = OpenLoopOptimizer(VDP, bc, V, gradient, grid, guess, tol, max_it)
-# p, V = optimizer.optimize()
-# print(f" p = {p}")
-# print(f" V = {V}")

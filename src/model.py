@@ -10,7 +10,6 @@ import os
 
 import numpy as np
 import torch
-import sys
 import os
 from loguru import logger
 from .ssn import SSN
@@ -21,20 +20,20 @@ from .utils import _phi
 
 class model:
     """
-    Van der Pol model trainer using shallow neural networks.
+    shallow neural networks
     
-    This class handles the complete training pipeline including:
-    - Data preparation and splitting
-    - Network initialization
-    - Training with various optimizers (Adam, SSN)
-    - Logging and checkpointing
     """
     
     def __init__(
         self, 
         training_percentage=0.9,
-        optimizer = "Adam", activation=torch.tanh, power=2.1, regularization=None, lr = 0.01,
-        loss_weights=(1.0, 1.0),  th=0.5, 
+        optimizer = "Adam", 
+        activation=torch.tanh, 
+        power=2.1, 
+        regularization=None, 
+        lr = 0.01,
+        loss_weights=(1.0, 1.0),  
+        th=0.5, 
         verbose=True,
         train_outerweights = False
         ):
@@ -72,35 +71,9 @@ class model:
         self.net = None
         self.optimizer = None  # Will store the actual optimizer instance (standard PyTorch convention)
         self.loss_history = {'train_loss': [], 'val_loss': [], 'value_loss': [], 'grad_loss': []}
-        
-        # Configure loguru logger
-        self._configure_logger()
         self.config = None
         
-    def _configure_logger(self):
-        """Configure loguru logger for training output."""
-        logger.remove()  # Remove default handler
-        
-        if self.verbose:
-            # Add terminal output only if verbose is True
-            logger.add(
-                sys.stdout,
-                format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
-                level="INFO"
-            )
-        
-        # Always log to file
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        log_history_dir = os.path.join(current_dir, "..", "log_history")
-        os.makedirs(log_history_dir, exist_ok=True)
-        log_file = os.path.join(log_history_dir, "training.log")
-        logger.add(
-            log_file,
-            format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}",
-            level="DEBUG",
-            rotation="10 MB"
-        )
-        
+        # Log initialization (logger should be configured at application level via setup_logging())
         if self.verbose:
             logger.info("Model initialized")
     
@@ -109,7 +82,7 @@ class model:
         Prepare and split data into training and validation sets.
         
         Args:
-            data: Either a dictionary with keys 'x', 'v', 'dv' OR a structured numpy array
+            data: Dictionary with keys 'x', 'v', 'dv'
             
         Returns:
             Tuple of (train_tensors, valid_tensors) where each is (x, v, dv)
@@ -119,32 +92,30 @@ class model:
             # Already in dictionary format
             ob_x, ob_v, ob_dv = data["x"], data["v"], data["dv"]
         else:
-            # Assume structured numpy array format: each element is (x, dv, v)
-            x_list, dv_list, v_list = [], [], []
-            for item in data:
-                x_coords, dv_vals, v_val = item
-                x_list.append(x_coords)
-                dv_list.append(dv_vals)
-                v_list.append(v_val)
+            # Commented out: structured numpy array format support
+            # x_list, dv_list, v_list = [], [], []
+            # for item in data:
+            #     x_coords, dv_vals, v_val = item
+            #     x_list.append(x_coords)
+            #     dv_list.append(dv_vals)
+            #     v_list.append(v_val)
+            # 
+            # ob_x = np.array(x_list, dtype=np.float64)
+            # ob_v = np.array(v_list, dtype=np.float64)
+            # ob_dv = np.array(dv_list, dtype=np.float64)
             
-            ob_x = np.array(x_list, dtype=np.float64)
-            ob_v = np.array(v_list, dtype=np.float64)
-            ob_dv = np.array(dv_list, dtype=np.float64)
+            raise ValueError(
+                "Data must be provided as a dictionary with keys 'x', 'v', 'dv'. "
+                "Please convert your structured numpy array to dictionary format:\n"
+                "  data = {'x': x_array, 'v': v_array, 'dv': dv_array}"
+            )
         
         # Split data into training and validation sets
-        num_samples = len(ob_x)
-        split_idx = int(num_samples * self.training_percentage)
-        train_indices = np.arange(split_idx)
-        valid_indices = np.arange(split_idx, num_samples)
+        split_idx = int(len(ob_x) * self.training_percentage)
         
-        # Create training and validation datasets
-        train_x = ob_x[train_indices].astype(np.float64)
-        train_v = ob_v[train_indices].astype(np.float64)
-        train_dv = ob_dv[train_indices].astype(np.float64)
-        
-        valid_x = ob_x[valid_indices].astype(np.float64)
-        valid_v = ob_v[valid_indices].astype(np.float64)
-        valid_dv = ob_dv[valid_indices].astype(np.float64)
+        train_x, valid_x = ob_x[:split_idx], ob_x[split_idx:]
+        train_v, valid_v = ob_v[:split_idx], ob_v[split_idx:]
+        train_dv, valid_dv = ob_dv[:split_idx], ob_dv[split_idx:]
         
         if self.verbose:
             logger.info(f"Training set: {len(train_x)} samples, Validation set: {len(valid_x)} samples")
