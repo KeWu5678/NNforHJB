@@ -1,7 +1,6 @@
 import torch
-from torch._inductor.config import autotune_remote_cache_default
+from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.optim import Optimizer
-import numpy as np
 from loguru import logger
 from .utils import _phi, _dphi, _ddphi, _compute_prox, _compute_dprox
 
@@ -82,7 +81,7 @@ class SSN(Optimizer):
         # D_nonconvex compute d/du (phi(|u|) - |u|)
         D_nonconvex = torch.sign(params) * (_dphi(torch.abs(params), th, gamma) - 1)
         # 
-        grad_loss = torch.autograd.grad(loss, self.param_groups[0]["params"], create_graph=True, retain_graph=True)
+        grad_loss = torch.autograd.grad(loss, self.param_groups[0]["params"], retain_graph=True)
         grad_flat = torch.cat([g.view(-1) for g in grad_loss])
         return c * (q - params) + alpha * D_nonconvex + grad_flat
 
@@ -96,15 +95,7 @@ class SSN(Optimizer):
             + self.alpha * torch.diag(_ddphi(torch.abs(params), th, gamma)) @ DPc 
             + (S.T @ S / S.shape[0]) @ DPc
         )
-    
-    def _update_parameters(self, u_flat):
-        """Helper function to update model parameters from flattened tensor."""
-        start = 0
-        for p in self.param_groups[0]["params"]:
-            numel = p.numel()
-            p.data.copy_(u_flat[start:start + numel].view(p.shape))
-            start += numel
-    
+        
     # Hidden activations are set directly by callers: optimizer.hidden_activations = S.detach()
     def step(self, closure):
         """
@@ -121,7 +112,7 @@ class SSN(Optimizer):
         iter_ls = 0
         
         loss = closure()      
-        params = torch.cat([p.view(-1) for p in self.param_groups[0]["params"]])
+        params = parameters_to_vector(self.param_groups[0]["params"])
         # logger.debug(f"Initial loss: {loss.item():.6e}, penalty: {(self.alpha * torch.sum(self._phi(torch.abs(params)))).item():.6e}")
         
         # Initialize proximal projection, approximative Gradient and Hessian
@@ -131,19 +122,19 @@ class SSN(Optimizer):
         I = torch.eye(params.shape[0], device=params.device, dtype=params.dtype)
         theta0 = 1.0 / (1e-12 * torch.norm(DG, p=float('inf')).item())
         
+        # Initilize outerweights and loss
         try:
             system_matrix = DG + (1/theta0) * I
             dq = -torch.linalg.solve(system_matrix, Gq)
             logger.debug(f"Solution (dq) norm: {torch.norm(dq).item():.6e}")
         except Exception as e:
-            logger.error(f"Linear solve failed: {e}")
+            logger.error(f"Initial linear solve failed: {e}")
             logger.error(f"Matrix condition was: {torch.linalg.cond(system_matrix).item():.2e}")
             return loss
         
-        # Initilize outerweights and loss
         qnew = q + dq
         unew = _compute_prox(qnew, alpha / c)
-        self._update_parameters(unew)
+        vector_to_parameters(unew, self.param_groups[0]["params"])
         loss_new = closure()
         
         # Initialize the damping parameter
@@ -181,13 +172,13 @@ class SSN(Optimizer):
             try:
                 qnew = q - torch.linalg.solve(DG + (1/theta) * I, Gq)
                 unew = _compute_prox(qnew, self.alpha / self.c)
-                self._update_parameters(unew)
+                vector_to_parameters(unew, self.param_groups[0]["params"])
                 loss_new = closure()
                 theta = theta / 4.0 
             except Exception as e:
                 logger.error(f"Damped linear solve failed: {e}")
                 # Restore original parameters
-                self._update_parameters(params)
+                vector_to_parameters(params, self.param_groups[0]["params"])
                 return loss 
             
             iter_ls += 1
@@ -198,7 +189,7 @@ class SSN(Optimizer):
             logger.warning(f"Final theta: {theta:.2e}")
             
             # Restore original parameters
-            self._update_parameters(params)
+            vector_to_parameters(params, self.param_groups[0]["params"])
             return loss
 
         return loss

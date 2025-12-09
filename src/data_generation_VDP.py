@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 import numpy as np
 from src import utils
 from src import openloop_optimizer as op
@@ -144,14 +145,16 @@ class DateGenerator:
         save_dir = os.path.join(base_dir, rawdata_subdir)
         os.makedirs(save_dir, exist_ok=True)
 
+        date_tag = datetime.now().strftime("%Y%m%d")
+
         # Filenames that indicate beta and grid resolution
         output_file = os.path.join(
             save_dir,
-            f"VDP_beta_{self.beta}_grid_{self.nx1}x{self.nx2}.npy",
+            f"VDP_beta_{self.beta}_grid_{self.nx1}x{self.nx2}_{date_tag}.npy",
         )
         failed_output_file = os.path.join(
             save_dir,
-            f"VDP_beta_{self.beta}_failed_ini_{self.nx1}x{self.nx2}.npy",
+            f"VDP_beta_{self.beta}_failed_ini_{self.nx1}x{self.nx2}_{date_tag}.npy",
         )
 
         # Save failed initial conditions if any
