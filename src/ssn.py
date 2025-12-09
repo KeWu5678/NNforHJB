@@ -1,10 +1,9 @@
 import torch
+from torch._inductor.config import autotune_remote_cache_default
 from torch.optim import Optimizer
 import numpy as np
 from loguru import logger
 from .utils import _phi, _dphi, _ddphi, _compute_prox, _compute_dprox
-
-# This is a standalone SSN optimizer that doesn't depend on deepxde
 
 
 class SSN(Optimizer):
@@ -20,7 +19,9 @@ class SSN(Optimizer):
         alpha (float):      regularization parameter for the penalty function
         gamma (float):      parameter for the non-convex penalty function
         th (float):         interpolation parameter between L1 (th=0) and non-convex (th=1) (default: 0.5)
-        lr (float):         mixing parameter between old and new parameters (default: 1.0)
+        lr (float):         mixing parameter between old and new parameters (default: 0.01)
+        max_ls_iter (int):  maximum number of line search iterations (default: 100)
+        tolerance_ls (float):  line search tolerance, accepts step if loss_new <= tolerance * loss (default: 1.0)
     """
     
     def __init__(
@@ -30,107 +31,71 @@ class SSN(Optimizer):
         gamma,
         th=0.5,
         lr=0.01,
+        max_ls_iter = 30000,
+        tolerance_ls=1.0 + 1e-10,
     ):
-        # Learning rate should be passed to the superclass optimizer
-        defaults = {"lr": lr}
+        defaults = {
+            "lr": lr,
+            "alpha": alpha,
+            "gamma": gamma,
+            "th": th,
+            "max_ls_iter": max_ls_iter,
+            "tolerance_ls": tolerance_ls,
+            }
         super().__init__(params, defaults)
-        
-        # param_groups is a list of dictionaries, each containing a 'params' key, defaulted in the PyTorch optimizer class.
         if len(self.param_groups) > 1:
             raise ValueError("SSN doesn't support per-parameter options")
+
         
-        self.alpha = alpha
-        self.gamma = gamma
-        self.th = th
-        
-        # SSN constant, lambda in the proximal operator
-        self.c = 1 + alpha * gamma
-        
-        self.q = None  # preimage of outer weights w.r.t. the proximal operator
-        self.n_iters = 0    # Number of SSN iterations
-        self.consecutive_failures = 0
         self.hidden_activations = None  # Store S matrix for Hessian
-    
-    def _Gradient(self, q, params, loss):
-        # - params: the outer weights
-        # - q: preimage of u w.r.t. the proximal operator
-        D_nonconvex = torch.sign(params) * (_ddphi(torch.abs(params), self.th, self.gamma) - 1)
-        try:
-            grad_loss = torch.autograd.grad(loss, self.param_groups[0]["params"], create_graph=True, retain_graph=True)
-            grad_flat = torch.cat([g.view(-1) for g in grad_loss])
-        except Exception as e:
-            logger.error(f"Failed to compute gradients in _Gradient: {e}")
-            grad_flat = torch.zeros_like(params)
-        return self.c * (q - params) + self.alpha * D_nonconvex + grad_flat
 
-    def _Hessian(self, q, params, loss):
-        DD_nonconvex = _ddphi(torch.abs(params), self.th, self.gamma)
-        DPc = _compute_dprox(q, self.alpha / self.c)
-        I = torch.eye(params.shape[0], device=params.device, dtype=params.dtype)
-        
-        # Use correct Gauss-Newton Hessian: S^T * S * DPc
-        # where S is the hidden activations matrix
-        if self.hidden_activations is not None:
-            S = self.hidden_activations  # shape: (batch_size, n_neurons)
-            STS = S.T @ S / S.shape[0]    # shape: (n_neurons, n_neurons), normalized by batch size
-            hessian_data_term = STS @ DPc
-            # logger.debug(f"Using correct Gauss-Newton Hessian: S^T*S*DPc, S shape: {S.shape}")
-        else:
-            # Fallback to identity if hidden activations not available
-            hessian_data_term = I @ DPc
-            logger.warning("Hidden activations not available, using identity approximation")
-        
-        return self.c * (I - DPc) + self.alpha * torch.diag(DD_nonconvex) @ DPc + hessian_data_term
-    
-    def _transform_param2q(self, params, loss):
-        """Compute q from current params following MATLAB SSN.m (lines 47-53).
-
-        gf0 = alpha * Dphima(u) + grad_loss(u), where
-        Dphima(u) = (dphi(|u|) - 1) * sign(u).
-        For nonzero entries of u, set gf0_i = -alpha * sign(u_i).
-        Then q = u - (1/c) * gf0.
+    def _initialize_q(self, alpha, gamma, th, params, loss):
         """
-        # Compute gradient of data term w.r.t. output weights
-        try:
-            grad_loss = torch.autograd.grad(
-                loss, self.param_groups[0]["params"], create_graph=True, retain_graph=True
-            )
-            grad_flat = torch.cat([g.view(-1) for g in grad_loss])
-        except Exception as e:
-            logger.error(f"Failed to compute gradients in _transform_param2q: {e}")
-            grad_flat = torch.zeros_like(params)
+        Following MATLAB SSN.m (lines 47-53).
+        """
+        grad_loss = torch.autograd.grad(
+            loss, self.param_groups[0]["params"], create_graph=True, retain_graph=True
+        )
+        grad_flat = torch.cat([g.view(-1) for g in grad_loss])
 
-        # Dphima(u) = (dphi(|u|) - 1) * sign(u)
-        dphi_term = _dphi(torch.abs(params), self.th, self.gamma) - 1.0
-        gf0 = self.alpha * torch.sign(params) * dphi_term + grad_flat
+        # gradient of F w.r.t the outerweight u (cf.p27 Kontantin)
+        gf_u = (
+            grad_flat +
+            alpha * torch.sign(params) * (_dphi(torch.abs(params), th, gamma) - 1.0) 
+        )
 
         # Override on nonzero entries: gf0_i = -alpha * sign(u_i)
         nonzero_mask = torch.abs(params) > 0
-        gf0 = torch.where(nonzero_mask, -self.alpha * torch.sign(params), gf0)
+        gf_u = torch.where(nonzero_mask, -alpha * torch.sign(params), gf_u)
 
-        # q = u - (1/c) * gf0
-        q = params - (1.0 / self.c) * gf0
+        q = params - (1.0 / self.c) * gf_u
         return q
 
-    # def _transform_param2q0(self, params, loss):
-    #     """Transform parameters to auxiliary variable q.
+    def _initilize_G(self, alpha, gamma,th, c, q, params, loss):
+        """
+        compute the gradient of the loss function. 
+        args: 
+        - params: the outer weights
+        - q: preimage of u w.r.t. the proximal operator
+        - c, alpha: hyperparameter in the algorithm
+        """
+        # D_nonconvex compute d/du (phi(|u|) - |u|)
+        D_nonconvex = torch.sign(params) * (_dphi(torch.abs(params), th, gamma) - 1)
+        # 
+        grad_loss = torch.autograd.grad(loss, self.param_groups[0]["params"], create_graph=True, retain_graph=True)
+        grad_flat = torch.cat([g.view(-1) for g in grad_loss])
+        return c * (q - params) + alpha * D_nonconvex + grad_flat
+
+    def _DG(self, gamma, th, q, params):
+        DPc = _compute_dprox(q, self.alpha / self.c)
+        I = torch.eye(params.shape[0], device=params.device, dtype=params.dtype)
+        S = self.hidden_activations
         
-    #     Args:
-    #         params: the outer weights
-    #         loss: the loss value (should be a scalar tensor with grad_fn)
-    #     Returns:
-    #         q: preimage of u w.r.t. the proximal operator
-    #     """
-    #     # Check if loss requires gradients
-    #     try:
-    #         grad_loss = torch.autograd.grad(loss, self.param_groups[0]["params"], create_graph=True, retain_graph=True)
-    #         grad_flat = torch.cat([g.view(-1) for g in grad_loss])
-    #         logger.debug(f"Gradient computed successfully, norm: {torch.norm(grad_flat).item():.6e}")
-    #     except Exception as e:
-    #         logger.error(f"Failed to compute gradients: {e}")
-    #         return params.clone()
-            
-    #     return params - (1 / self.c) * (grad_flat + self.alpha * torch.sign(params) * (_ddphi(torch.abs(params), self.th, self.gamma)))
+        return (
+            self.c * (I - DPc) 
+            + self.alpha * torch.diag(_ddphi(torch.abs(params), th, gamma)) @ DPc 
+            + (S.T @ S / S.shape[0]) @ DPc
+        )
     
     def _update_parameters(self, u_flat):
         """Helper function to update model parameters from flattened tensor."""
@@ -141,38 +106,33 @@ class SSN(Optimizer):
             start += numel
     
     # Hidden activations are set directly by callers: optimizer.hidden_activations = S.detach()
-
     def step(self, closure):
-        """Perform a single optimization step using semismooth Newton method with damping.
-        
+        """
+        Perform a single optimization step using semismooth Newton method with damping.
         Args:
-            closure (callable): A closure that reevaluates the model and returns the loss.
-                
+            closure (callable): A closure that reevaluates the model and returns the loss.   
         Returns:
             loss: The loss value.
         """
         # logger.info(f"SSN Step {self.n_iters}")
-        
         # Get current loss and parameters
+        alpha, th, gamma = (self.param_groups[0][k] for k in ("alpha", "th", "gamma"))
+        c = alpha / gamma  # SSN constant, lambda in the proximal operator
+        iter_ls = 0
+        
         loss = closure()      
         params = torch.cat([p.view(-1) for p in self.param_groups[0]["params"]])
         # logger.debug(f"Initial loss: {loss.item():.6e}, penalty: {(self.alpha * torch.sum(self._phi(torch.abs(params)))).item():.6e}")
         
-        # Initialize q
-        q = self._transform_param2q(params, loss)  # Pass loss instead of loss for gradient computation
-        # Compute gradient and Hessian
-        Gq = self._Gradient(q, params, loss)    
-        DG = self._Hessian(q, params, loss)
-        grad_norm = torch.norm(Gq).item()
+        # Initialize proximal projection, approximative Gradient and Hessian
+        q = self._initialize_q(alpha, gamma, th, params, loss)  # Pass loss instead of loss for gradient computation
+        Gq = self._initilize_G(q, alpha, gamma, c, q, params, loss)    
+        DG = self._DG(gamma, th, q, params)
         I = torch.eye(params.shape[0], device=params.device, dtype=params.dtype)
-        theta0_base = 1.0 / (1e-12 * torch.norm(DG, p=float('inf')).item())
+        theta0 = 1.0 / (1e-12 * torch.norm(DG, p=float('inf')).item())
         
-        # Calculte the initial gradient decent and update the parameter q and u. 
         try:
-            # Log the linear system we're trying to solve
-            system_matrix = DG + (1/theta0_base) * I
-            # logger.debug(f"Linear system matrix condition: {torch.linalg.cond(system_matrix).item():.2e}")
-            # logger.debug(f"RHS (Gq) norm: {torch.norm(Gq).item():.6e}")
+            system_matrix = DG + (1/theta0) * I
             dq = -torch.linalg.solve(system_matrix, Gq)
             logger.debug(f"Solution (dq) norm: {torch.norm(dq).item():.6e}")
         except Exception as e:
@@ -180,56 +140,43 @@ class SSN(Optimizer):
             logger.error(f"Matrix condition was: {torch.linalg.cond(system_matrix).item():.2e}")
             return loss
         
-        # Update outer weights and evaluate new loss
+        # Initilize outerweights and loss
         qnew = q + dq
-        unew = _compute_prox(qnew, self.alpha / self.c)
+        unew = _compute_prox(qnew, alpha / c)
         self._update_parameters(unew)
         loss_new = closure()
         
-        # update the damping parameter
-        dq_norm = torch.norm(dq).item()
-        Gq_norm = torch.norm(Gq).item()
-        if Gq_norm < 1e-20:  # avoid division by zero
-            Gq_norm = 1e-20
-        theta0 = max(dq_norm / Gq_norm, theta0_base)
+        # Initialize the damping parameter
+        dq_norm, Gq_norm = torch.norm(dq).item(), max(torch.norm(Gq).item(), 1e-20)  # clamp to avoid div-by-zero
+        theta = max(dq_norm / Gq_norm, theta0)
         logger.debug(f"Initial theta0: {theta0:.6e}, step norm: {dq_norm:.6e}")
-        theta = theta0
 
         # Initialize the Line search with backtracking (matching MATLAB exactly)
-        iter_ls = 0
-        eps_machine = torch.finfo(loss.dtype).eps
-        tolerance = 1 + 1000 * eps_machine
-        if not torch.isnan(loss_new) and loss_new <= loss.item():
-            self.n_iters += 1
-            return loss
+        tolerance_ls = self.param_groups[0]["tolerance_ls"]
+        max_ls_iter = self.param_groups[0]["max_ls_iter"]
         
-        # Limit line search iterations to prevent infinite loops
-        max_ls_iter = 100
-        
-        while (torch.isnan(loss_new) or loss_new > tolerance * loss) and iter_ls < max_ls_iter:
+        while (torch.isnan(loss_new) or loss_new > tolerance_ls * loss) and iter_ls < max_ls_iter:
             # ------------------------------------------------------------------
             # SAFETY GUARD 1: stop damping if theta is already tiny. Line Search stops
             # ------------------------------------------------------------------
-            if theta < 1e-15:
-                logger.warning(f"Theta reached {theta:.1e}. Breaking line search loop.")
-                break
+            # if theta < 1e-20:
+            #     logger.warning(f"Theta reached {theta:.1e}. Breaking line search loop.")
+            #     break
             # ------------------------------------------------------------------
-            if iter_ls < 10 or iter_ls % 20 == 0:  # Only log occasionally
-                logger.debug(f"Damping step {iter_ls}: theta={theta:.2e}, loss_new={loss_new.item():.10e}")
+            # if iter_ls < 10 or iter_ls % 20 == 0:  # Only log occasionally
+            #     logger.debug(f"Damping step {iter_ls}: theta={theta:.2e}, loss_new={loss_new.item():.10e}")
             # ------------------------------------------------------------------
             # SAFETY GUARD 2: if the tentative step exploded, back-track harder
             # ------------------------------------------------------------------
-            if torch.isnan(unew).any() or torch.isinf(unew).any():
-                logger.warning("unew contains Inf/NaN – increasing damping (theta *= 4) and retrying")
-                theta = theta * 4.0  # undo last division so next loop will divide again
-                iter_ls += 1
-                break
-            # ------------------------------------------------------------------   
+            # if torch.isnan(unew).any() or torch.isinf(unew).any():
+            #     logger.warning("unew contains Inf/NaN – increasing damping (theta *= 4) and retrying")
+            #     theta = theta * 4.0  # undo last division so next loop will divide again
+            #     iter_ls += 1
+            #     break
 
-            # Check for NaN early and break
-            if torch.isnan(loss_new) and iter_ls > 50:
-                logger.warning("Persistent NaN in line search, stopping")
-                break
+            # if torch.isnan(loss_new) and iter_ls > 50:
+            #     logger.warning("Persistent NaN in line search, stopping")
+            #     break
 
             try:
                 qnew = q - torch.linalg.solve(DG + (1/theta) * I, Gq)
@@ -250,22 +197,10 @@ class SSN(Optimizer):
             logger.warning(f"Final lossective values: loss={loss.item():.6e}, loss_new={loss_new.item() if not torch.isnan(loss_new) else 'NaN'}")
             logger.warning(f"Final theta: {theta:.2e}")
             
-            # Track consecutive failures to prevent infinite loops
-            self.consecutive_failures += 1
-            if self.consecutive_failures >= 5:
-                logger.error(f"SSN optimizer has failed {self.consecutive_failures} consecutive times. This may indicate:")
-                logger.error("  1. The problem is not suitable for SSN optimization")
-                logger.error("  2. The regularization parameters (alpha, gamma) are inappropriate")
-                logger.error("  3. The gradient computation is incorrect")
-                logger.error("  Consider switching to Adam optimizer or adjusting parameters.")
-                raise RuntimeError("SSN optimizer failed repeatedly - stopping to prevent infinite loop")
-            
             # Restore original parameters
             self._update_parameters(params)
             return loss
 
-        self.consecutive_failures = 0
-        self.n_iters += 1
         return loss
     
 
