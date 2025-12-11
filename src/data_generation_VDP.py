@@ -138,8 +138,14 @@ class DateGenerator:
         # Return dataset and failed initial conditions
         return dataset, failed_ini
 
-    def data_save(self, rawdata_subdir: str = "raw_data"):
-        """Save dataset and failed initial conditions to .npy files under rawdata."""
+    def data_save(self, dataset, failed_ini, rawdata_subdir: str = "raw_data"):
+        """
+        Save dataset and failed initial conditions to .npy files under rawdata.
+
+        This function is intentionally stateless: it only saves the arrays that are
+        passed in (typically the return values of `data_generation`) and does not
+        rely on any other attributes of the class instance.
+        """
         # Base rawdata directory (../rawdata relative to this file)
         base_dir = os.path.join(os.path.dirname(__file__), "..", "rawdata")
         save_dir = os.path.join(base_dir, rawdata_subdir)
@@ -147,24 +153,25 @@ class DateGenerator:
 
         date_tag = datetime.now().strftime("%Y%m%d")
 
-        # Filenames that indicate beta and grid resolution
+        # Simple filenames; we do not encode any global information (beta, grid, etc.)
         output_file = os.path.join(
             save_dir,
-            f"VDP_beta_{self.beta}_grid_{self.nx1}x{self.nx2}_{date_tag}.npy",
+            f"VDP_dataset_{date_tag}.npy",
         )
         failed_output_file = os.path.join(
             save_dir,
-            f"VDP_beta_{self.beta}_failed_ini_{self.nx1}x{self.nx2}_{date_tag}.npy",
+            f"VDP_failed_ini_{date_tag}.npy",
         )
 
+        # Save main dataset
+        print(f"Saving dataset to {output_file}")
+        np.save(output_file, dataset)
+
         # Save failed initial conditions if any
-        if self.failed_ini:
-            failed_ini_arr = np.array(self.failed_ini)
+        if failed_ini is not None and len(failed_ini) > 0:
+            failed_ini_arr = np.array(failed_ini)
             print(f"Saving {len(failed_ini_arr)} failed initial conditions to {failed_output_file}")
             np.save(failed_output_file, failed_ini_arr)
         else:
-            print("All initial conditions converged successfully")
-
-        print(f"Saving results to {output_file}")
-        np.save(output_file, self.dataset)
+            print("No failed initial conditions to save")
 
