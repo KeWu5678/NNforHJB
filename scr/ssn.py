@@ -5,8 +5,9 @@ from torch import Tensor
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.optim import Optimizer
 from loguru import logger
-from .utils import _phi, _dphi, _ddphi, _compute_prox, _compute_dprox
+from .utils import _dphi, _ddphi, _compute_prox, _compute_dprox
 
+__all__ = ["SSN"]
 
 class SSN(Optimizer):
     """Semismooth Newton optimizer for non-convex regularized problems.
@@ -63,7 +64,7 @@ class SSN(Optimizer):
         Following MATLAB SSN.m (lines 47-53). It assume the NOC it fufilled and back calculate the proxy.
         """
         grad_loss = torch.autograd.grad(
-            loss, self.param_groups[0]["params"], create_graph=True, retain_graph=True
+            loss, self.param_groups[0]["params"], create_graph=False, retain_graph=True
         )
         grad_flat = torch.cat([g.view(-1) for g in grad_loss])
 
@@ -200,7 +201,6 @@ class SSN(Optimizer):
         qnew: Tensor = q + dq
         unew: Tensor = _compute_prox(qnew, alpha / c)
         
-        
         # Evaluate loss at full Newton step
         vector_to_parameters(unew, self.param_groups[0]["params"])
         loss_new: Tensor = closure()
@@ -209,25 +209,25 @@ class SSN(Optimizer):
         dq_norm: float = torch.norm(dq).item()
         Gq_norm: float = max(torch.norm(Gq).item(), 1e-20)  # clamp to avoid div-by-zero
         theta: float = max(dq_norm / Gq_norm, theta0)
-
         
-        # IMPORTANT: The original code only varied damping in the solve, but always
-        # took a FULL step to unew = prox(qnew). As theta→0, dq→0, so qnew→q, and 
-        # unew→prox(q), the line search fails.
+        # IMPORTANT: The original code only varied damping in the solve, but always FULL step.
+        # As theta→0, dq→0, so qnew→q, unew→prox(q) the line search fails
         # FIX: Use a proper step-size (alpha_ls) to interpolate between params and unew:
         #      utrial = params + alpha_ls * (unew - params)
-
+        
         # Initialize the line search with backtracking (matching MATLAB exactly)
         tolerance_ls: float = self.param_groups[0]["tolerance_ls"]
         max_ls_iter: int = self.param_groups[0]["max_ls_iter"]
         
+        min_theta: float = 1e-12  # prevent theta from underflowing to zero
         while (torch.isnan(loss_new) or loss_new > tolerance_ls * loss) and iter_ls < max_ls_iter:
             try:
-                qnew = q - lr * torch.linalg.solve(DG + (1/theta) * I, Gq)
+                theta_safe = max(theta, min_theta)
+                qnew = q - lr * torch.linalg.solve(DG + (1/theta_safe) * I, Gq)
                 unew = _compute_prox(qnew, alpha / c)
                 vector_to_parameters(unew, self.param_groups[0]["params"])
                 loss_new = closure()
-                theta = theta / 4.0 
+                theta = max(theta / 4.0, min_theta)
             except Exception as e:
                 logger.error(f"Damped linear solve failed: {e}")
                 vector_to_parameters(params, self.param_groups[0]["params"])

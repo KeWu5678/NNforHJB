@@ -93,12 +93,10 @@ class ShallowNetwork(nn.Module):
         x = self.output(x)
         return x
     
-    def forward_with_hidden(self, x):
+    def forward_network_matrix(self, x):
         """Forward pass that also returns hidden activations for SSN optimizer."""
         # Hidden layer transformation
         hidden = torch.nn.functional.linear(x, self.hidden.weight, self.hidden.bias)
         # Apply activation with power
-        hidden_activated = self.activation(hidden) ** self.p
-        # Output layer
-        output = self.output(hidden_activated)
-        return output, hidden_activated
+        network_matrix = self.activation(hidden) ** self.p
+        return network_matrix
