@@ -1,21 +1,5 @@
 import torch
-from typing import Callable, Optional, Union
-
-
-TensorOrOp = Union[torch.Tensor, Callable[[torch.Tensor], torch.Tensor]]
-
-
-def _apply_op(op: Optional[TensorOrOp], v: torch.Tensor) -> torch.Tensor:
-    """Apply a linear operator or matrix to vector v.
-
-    If op is None, return v. If op is a callable, return op(v). If op is a
-    tensor, return op @ v.
-    """
-    if op is None:
-        return v
-    if callable(op):
-        return op(v)
-    return op @ v
+from typing import Optional
 
 
 def _to_boundary(x: torch.Tensor, d: torch.Tensor, s: float) -> tuple[torch.Tensor, float]:
@@ -41,12 +25,12 @@ def _to_boundary(x: torch.Tensor, d: torch.Tensor, s: float) -> tuple[torch.Tens
 
 
 def mpcg(
-    H: TensorOrOp,
+    H: torch.Tensor,
     b: torch.Tensor,
     rtol: float = 1e-3,
     maxit: int = 100,
     sigma: float = 0.0,
-    DP: Optional[TensorOrOp] = None,
+    DP: Optional[torch.Tensor] = None,
 ):
     """Projected Conjugate Gradient with optional trust-region.
 
@@ -75,8 +59,8 @@ def mpcg(
     # r(x) = b - H x, start with x = 0
     r = b.clone() 
     z = r.clone()
-    DPz = _apply_op(DP, z)
-    resres = torch.dot(r, DPz)
+    DPz = z if DP is None else (DP @ z)
+    resres = torch.dot(r, DPz)  # r' * DP * z
 
     # clone of the iterates and preconditioned iterates
     d = z.clone()
@@ -90,9 +74,6 @@ def mpcg(
 
     iters = 0
     flag = 'convgd'
-
-    def _apply_H(v: torch.Tensor) -> torch.Tensor:
-        return _apply_op(H, v)
 
     # Main loop; stopping like in MATLAB
     # while sqrt(-epseps) >= sqrt(-pred)*rtol and sqrt(resres) >= res0*(1e-2*rtol)
@@ -109,7 +90,7 @@ def mpcg(
             iters = maxit
             break
 
-        Hd = _apply_H(d)
+        Hd = H @ d
         gamma = torch.dot(Hd, DPd)
 
         # Negative curvature
@@ -119,34 +100,32 @@ def mpcg(
                 x, tau = _to_boundary(x, d, sigma)
                 pred = pred - tau * resres.item() + 0.5 * tau * tau * gamma.item()
                 r = r - tau * Hd
-                resres = torch.dot(r, _apply_op(DP, r))
+                resres = torch.dot(r, r) if DP is None else torch.dot(r, DP @ r)
             relres = float(torch.sqrt(torch.clamp(resres, min=0.0)) / (res0 + 1e-30))
             return x, flag, float(pred), relres, iters
 
         alpha = resres / (gamma + 1e-30)
         xnew = x + alpha * d
 
-        # Trust region boundary check
+        # Trust region redius reached 
         normx = torch.norm(xnew)
         if sigma > 0 and normx > sigma:
             flag = 'radius'
             x, tau = _to_boundary(x, d, sigma)
             pred = pred - tau * resres.item() + 0.5 * tau * tau * gamma.item()
             r = r - tau * Hd
-            resres = torch.dot(r, _apply_op(DP, r))
+            resres = torch.dot(r, r) if DP is None else torch.dot(r, DP @ r)
             relres = float(torch.sqrt(torch.clamp(resres, min=0.0)) / (res0 + 1e-30))
             return x, flag, float(pred), relres, iters
         else:
             x = xnew
 
         r = r - alpha * Hd
-
-        # epseps = -0.5 * alpha * resres
         epseps = -0.5 * (alpha * resres).item()
         pred = pred + epseps
 
         z = r.clone()
-        DPz = _apply_op(DP, z)
+        DPz = z if DP is None else (DP @ z)
         resresold = resres
         resres = torch.dot(r, DPz)
 
@@ -154,9 +133,9 @@ def mpcg(
         d = z + beta * d
         DPd = DPz + beta * DPd
 
-    # Final step along z to minimize ||H(x + theta z) - b||^2
+    # determine theta to minimize ||H(x + theta z) - b||^2
     z = r.clone()
-    Hz = _apply_H(z)
+    Hz = H @ z
     numerator = torch.dot(r, Hz)
     denom = torch.dot(Hz, Hz) + 1e-30
     theta = numerator / denom
@@ -170,11 +149,11 @@ def mpcg(
     else:
         x = xnew
 
-    DPz = _apply_op(DP, z)
+    DPz = z if DP is None else (DP @ z)
     pred = pred - theta.item() * resres.item() + 0.5 * (theta * theta * torch.dot(Hz, DPz)).item()
-
     r = r - theta * Hz
-    # relres based on full residual
+    # MATLAB: z = r; relres = sqrt(r' * z) / fres0 = ||r|| / fres0
+    z = r
     relres = float(torch.sqrt(torch.dot(r, z)) / (fres0 + 1e-30))
 
     return x, flag, float(pred), relres, iters
