@@ -32,7 +32,7 @@ class SSN(Optimizer):
         alpha: float,
         gamma: float,
         th: float = 0.5,
-        lr: float = 0.01,
+        lr: float = 1.0,
         max_ls_iter: int = 30000,
         tolerance_ls: float = 1.0 + 1e-10,
     ) -> None:
@@ -50,6 +50,9 @@ class SSN(Optimizer):
 
         
         self.hidden_activations: Optional[Tensor] = None  # Store S matrix for Hessian
+        # Expose whether the last SSN step was accepted.
+        # This is useful for training-loop early stopping / fallbacks.
+        self.last_step_success: bool = True
 
     def _initialize_q(
         self, 
@@ -169,6 +172,7 @@ class SSN(Optimizer):
         """
         # Get current loss and parameters
         alpha, th, gamma, lr = (self.param_groups[0][k] for k in ("alpha", "th", "gamma", "lr"))
+        self.last_step_success = True
         
         # IMPORTANT:
         # Using c = alpha/gamma makes 1/c = gamma/alpha huge for small alpha,
@@ -196,6 +200,7 @@ class SSN(Optimizer):
         except Exception as e:
             logger.error(f"Initial linear solve failed: {e}")
             logger.error(f"Matrix condition was: {torch.linalg.cond(system_matrix).item():.2e}")
+            self.last_step_success = False
             return loss
         
         qnew: Tensor = q + dq
@@ -220,6 +225,9 @@ class SSN(Optimizer):
         max_ls_iter: int = self.param_groups[0]["max_ls_iter"]
         
         min_theta: float = 1e-12  # prevent theta from underflowing to zero
+        # check (loss_new - tolerance_ls * loss)
+        # check if DG is invertible. and condition number.  
+        # check the inner weights （if they are linear independent)
         while (torch.isnan(loss_new) or loss_new > tolerance_ls * loss) and iter_ls < max_ls_iter:
             try:
                 theta_safe = max(theta, min_theta)
@@ -231,6 +239,7 @@ class SSN(Optimizer):
             except Exception as e:
                 logger.error(f"Damped linear solve failed: {e}")
                 vector_to_parameters(params, self.param_groups[0]["params"])
+                self.last_step_success = False
                 return loss
 
             iter_ls += 1
@@ -240,5 +249,7 @@ class SSN(Optimizer):
             logger.warning(f"Final lossective values: loss={loss.item():.6e}, loss_new={loss_new.item() if not torch.isnan(loss_new) else 'NaN'}")
             logger.warning(f"Final theta: {theta:.2e}")
             vector_to_parameters(params, self.param_groups[0]["params"])
+            self.last_step_success = False
             return loss
+        self.last_step_success = True
         return loss_new

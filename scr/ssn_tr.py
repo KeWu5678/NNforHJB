@@ -46,6 +46,7 @@ class SSN_TR(SSN):
         linear solve with a (preconditioned) TR-Krylov solve.
         """
         alpha, th, gamma, lr = (self.param_groups[0][k] for k in ("alpha", "th", "gamma", "lr"))
+        self.last_step_success = True
         # Keep c consistent with SSN.step() (stable scaling)
         c: float = 1.0 + alpha * gamma
         lr = float(self.param_groups[0].get("lr", 1.0))
@@ -82,6 +83,7 @@ class SSN_TR(SSN):
             logger.debug(f"TR reject: Δloss={(loss_new - loss).item():.3e} {sigmaold:.2e}->{self.sigma:.2e}")
             # restore original params
             vector_to_parameters(params, self.param_groups[0]["params"])
+            self.last_step_success = False
             return loss
         else:
             # Accept step. IMPORTANT:
@@ -98,6 +100,7 @@ class SSN_TR(SSN):
             # logger.debug(f"TR accept: flag={tr_flag} pred={pred:.3e} {sigmaold:.2e}->{self.sigma:.2e}")
 
             # keep updated params (already set)
+            self.last_step_success = True
             return loss_new
 
 __all__ = ["SSN_TR"]

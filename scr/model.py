@@ -6,10 +6,7 @@ Created on Tue Dec  3 18:30:52 2024
 @author: chaoruiz
 """
 
-import os
 from typing import Optional, Tuple
-
-import numpy as np
 import torch
 import os
 from loguru import logger
@@ -30,7 +27,7 @@ class model:
         optimizer: str = "SGD", 
         activation: torch.nn.Module = torch.relu, 
         power: float = 2.1, 
-        lr: float = 0.01,
+        lr: float = 1.0,
         loss_weights: Tuple[float, float] = (1.0, 1.0), 
         th: float = 0.5,
         training_percentage: float = 0.9,  
@@ -139,8 +136,7 @@ class model:
             else:
                 # Number of neurons is the first dimension for PyTorch
                 n = inner_weights.shape[0]
-                if self.verbose:
-                    logger.info(f"Creating network with {n} neurons")
+                logger.info(f"Creating network with {n} neurons")
         
         # Create the shallow network
             self.net = ShallowNetwork(
@@ -173,7 +169,7 @@ class model:
                 optimizer_class = SSN if self.optimizer_type == "SSN" else SSN_TR
                 self.optimizer = optimizer_class(output_params, alpha=self.alpha, gamma=self.gamma, th=self.th, lr=self.lr)
                 if self.verbose:
-                    logger.info(f"Using {self.optimizer_type} optimizer with alpha={self.alpha}, gamma={self.gamma}, th={self.th}")
+                    logger.info(f"Using {self.optimizer_type} optimizer with alpha={self.alpha}, gamma={self.gamma}, th={self.th}, lr ={self.lr}")
             else:
                 # SSN optimizer is for outerweights only
                 logger.debug(f"SSN optimizer is for outerweights only")
@@ -184,8 +180,8 @@ class model:
             if optimizer_class is None:
                 logger.info(f"Warning: {self.optimizer_type} not found, using SGD")
                 optimizer_class = torch.optim.SGD
-            else:
-                self.optimizer = optimizer_class(output_params, lr=self.lr)
+            # Always instantiate the optimizer (including fallback SGD)
+            self.optimizer = optimizer_class(output_params, lr=self.lr)
     
     def _compute_loss(self, x_input: torch.Tensor, target_v: torch.Tensor, target_dv: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
@@ -256,8 +252,11 @@ class model:
         
         # Reset loss history
         self.loss_history = {'train_loss': [], 'val_loss': [], 'value_loss': [], 'grad_loss': []}
-        best_val_loss = float('inf')    # Track and save running best model by validation loss
+        # Track and save running best model by validation loss
+        best_val_loss = float('inf')
         best_epoch = -1
+        # Ensure best_state is always defined (e.g. iterations == 0)
+        best_state = {k: v.detach().clone() for k, v in self.net.state_dict().items()}
 
         # Define closure() for SSN
         def closure():
@@ -267,6 +266,8 @@ class model:
             return total_loss
 
         # Training loop
+        consecutive_failed_ssn_steps = 0
+        max_consecutive_failed_ssn_steps = 3
         for epoch in range(iterations):
             self.optimizer.zero_grad()
             if isinstance(self.optimizer, (SSN, SSN_TR)):
@@ -285,7 +286,28 @@ class model:
             if val_loss.item() < best_val_loss:
                 best_val_loss = val_loss.item()
                 best_epoch = epoch
-                best_state = self.net.state_dict()
+                # Snapshot a real checkpoint (not just a view into current params)
+                best_state = {k: v.detach().clone() for k, v in self.net.state_dict().items()}
+
+            # Early-stop SSN training if line search fails repeatedly
+            if isinstance(self.optimizer, (SSN, SSN_TR)):
+                step_success = bool(getattr(self.optimizer, "last_step_success", True))
+                if not step_success:
+                    consecutive_failed_ssn_steps += 1
+                    if self.verbose:
+                        logger.warning(
+                            f"SSN step rejected (consecutive={consecutive_failed_ssn_steps}/{max_consecutive_failed_ssn_steps})"
+                        )
+                else:
+                    consecutive_failed_ssn_steps = 0
+
+                if consecutive_failed_ssn_steps >= max_consecutive_failed_ssn_steps:
+                    if self.verbose:
+                        logger.warning(
+                            f"Early stopping: SSN line search failed for {max_consecutive_failed_ssn_steps} consecutive epochs. "
+                            f"Restoring best model at epoch {best_epoch} (val={best_val_loss:.6f})."
+                        )
+                    break
             
             # Validation loss for logging
             if epoch % display_every == 0:
@@ -298,6 +320,16 @@ class model:
 
         
         # Restore the best model before returning and report best loss
-        # self.net.load_state_dict(torch.load(best_model_path))
+        self.net.load_state_dict(best_state)
         logger.info(f"Best validation loss: {best_val_loss:.6f} at iteration {best_epoch}")
+
+        # Persist a small training summary for downstream code (e.g. PDPA.retrain)
+        # Keep this lightweight (do not store the full state_dict in config/history).
+        self.config = {
+            "best_val_loss": float(best_val_loss),
+            "best_epoch": int(best_epoch),
+            "iterations": int(iterations),
+            "optimizer": str(self.optimizer_type),
+            "train_outerweights": bool(self.train_outerweights),
+        }
         
