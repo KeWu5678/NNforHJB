@@ -1,3 +1,4 @@
+from tabnanny import verbose
 from typing import Callable, Iterable, Optional
 
 import torch
@@ -245,9 +246,10 @@ class SSN(Optimizer):
             iter_ls += 1
         
         if iter_ls >= max_ls_iter or torch.isnan(loss_new):
-            logger.warning(f"Line search failed after {iter_ls} iterations")
-            logger.warning(f"Final lossective values: loss={loss.item():.6e}, loss_new={loss_new.item() if not torch.isnan(loss_new) else 'NaN'}")
-            logger.warning(f"Final theta: {theta:.2e}")
+            if verbose:
+                logger.warning(f"Line search failed after {iter_ls} iterations")
+                logger.warning(f"Final lossective values: loss={loss.item():.6e}, loss_new={loss_new.item() if not torch.isnan(loss_new) else 'NaN'}")
+                logger.warning(f"Final theta: {theta:.2e}")
             vector_to_parameters(params, self.param_groups[0]["params"])
             self.last_step_success = False
             return loss

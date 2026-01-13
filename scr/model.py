@@ -136,7 +136,8 @@ class model:
             else:
                 # Number of neurons is the first dimension for PyTorch
                 n = inner_weights.shape[0]
-                logger.info(f"Creating network with {n} neurons")
+                if self.verbose:
+                    logger.info(f"Creating network with {n} neurons")
         
         # Create the shallow network
             self.net = ShallowNetwork(
@@ -321,7 +322,8 @@ class model:
         
         # Restore the best model before returning and report best loss
         self.net.load_state_dict(best_state)
-        logger.info(f"Best validation loss: {best_val_loss:.6f} at iteration {best_epoch}")
+        if self.verbose:
+            logger.info(f"Best validation loss: {best_val_loss:.6f} at iteration {best_epoch}")
 
         # Persist a small training summary for downstream code (e.g. PDPA.retrain)
         # Keep this lightweight (do not store the full state_dict in config/history).

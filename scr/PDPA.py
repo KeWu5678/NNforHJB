@@ -89,6 +89,7 @@ class PDPA:
         model: Any,
         N: int,
         alpha: float,
+        verbose: bool = True,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Insert N neurons that satisfies the NOC of the Primal-Dual-Proximal-Algorithm
@@ -219,7 +220,8 @@ class PDPA:
 
         tried = int(N)
         accepted = int(len(accepted_a))
-        logger.info(f"insertion - tried {tried} candidates, accepted {accepted} (alpha={alpha})")
+        if verbose:
+            logger.info(f"insertion - tried {tried} candidates, accepted {accepted} (alpha={alpha})")
 
         if len(accepted_a) == 0:
             return np.empty((0, 2), dtype=np.float64), np.empty((0,), dtype=np.float64)
@@ -235,6 +237,7 @@ class PDPA:
         biases: torch.Tensor,
         outer_weights: torch.Tensor,
         threshold: float,
+        verbose: bool = True,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Prune neurons with small outer weights (torch-in / torch-out)."""
 
@@ -256,7 +259,8 @@ class PDPA:
         keep_mask = ow_flat.abs() >= threshold
         pruned_count = int((~keep_mask).sum().item())
         if pruned_count > 0:
-            logger.info(f"Pruned {pruned_count} neurons with small weights")
+            if verbose:
+                logger.info(f"Pruned {pruned_count} neurons with small weights")
 
         w_pruned = w[keep_mask]
         b_pruned = b[keep_mask]
@@ -322,6 +326,7 @@ class PDPA:
                 b_hidden,
                 state_2["output.weight"],
                 threshold,
+                verbose=verbose,
             )
 
             # Evaluate losses for the *pruned* network snapshot we will store.
@@ -350,7 +355,9 @@ class PDPA:
                 if verbose: logger.info(f"New best model found at iteration {i} with validation loss: {best_val_loss:.6f}")
             
             # Insert neurons and train
-            W_to_insert, b_to_insert = self.insertion(self.data_train, self.model1, num_insertion, self.alpha)
+            W_to_insert, b_to_insert = self.insertion(
+                self.data_train, self.model1, num_insertion, self.alpha, verbose=verbose
+            )
             W_to_insert_t = torch.as_tensor(W_to_insert, dtype=W_hidden.dtype, device=W_hidden.device)
             b_to_insert_t = torch.as_tensor(b_to_insert, dtype=b_hidden.dtype, device=b_hidden.device)
             W_hidden = torch.cat((W_hidden, W_to_insert_t), dim=0)
