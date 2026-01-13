@@ -166,45 +166,6 @@ def L2(grid, x):
         norm += mesh * (x[i] ** 2)
     return norm
 
-# Define a custom H1 error metric for DeepXDE
-# def h1_error(y_true, y_pred, x, model):
-#     """
-#     Calculate H1 error (L2 error of values + L2 error of gradients)
-    
-#     Args:
-#         y_true: True values
-#         y_pred: Predicted values
-#         x: Input points
-#         model: The DeepXDE model
-#     """
-#     # L2 error of values - already computed as MSE by default
-#     value_error = dde.metrics.mean_squared_error(y_true, y_pred)
-    
-#     # Get gradients from auxiliary variables (true gradients)
-#     grad_true = model.data.test_aux_vars
-    
-#     # Calculate predicted gradients using autodiff
-#     inputs = dde.backend.as_tensor(x)
-#     inputs.requires_grad_()
-#     outputs = model.net(inputs)
-    
-#     # Calculate gradient with respect to inputs
-#     grad_pred = []
-#     for i in range(2):  # For 2D problem
-#         grad_i = dde.grad.jacobian(outputs, inputs, i=0, j=i)
-#         grad_pred.append(grad_i)
-    
-#     grad_pred = torch.cat(grad_pred, dim=1)
-    
-#     # Calculate L2 error of gradients
-#     gradient_error = torch.mean((grad_pred - torch.tensor(grad_true))**2)
-    
-#     # H1 error = L2 error of values + L2 error of gradients
-#     h1_error = value_error + gradient_error
-    
-#     # Round to 8 digits
-#     return round(h1_error.item(), 8)
-
 def remove_duplicates(points, tolerance=1e-3):
     """
     Remove duplicate points from a numpy array of shape (n, d)
