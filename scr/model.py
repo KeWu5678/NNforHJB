@@ -296,8 +296,9 @@ class model:
                 if not step_success:
                     consecutive_failed_ssn_steps += 1
                     if self.verbose:
+                        max_ls_iter = self.optimizer.param_groups[0]['max_ls_iter']
                         logger.warning(
-                            f"SSN step rejected (consecutive={consecutive_failed_ssn_steps}/{max_consecutive_failed_ssn_steps})"
+                            f"SSN step rejected (consecutive={consecutive_failed_ssn_steps}/{max_consecutive_failed_ssn_steps}, max_ls_iter={max_ls_iter})"
                         )
                 else:
                     consecutive_failed_ssn_steps = 0

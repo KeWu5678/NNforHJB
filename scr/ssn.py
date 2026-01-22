@@ -34,8 +34,8 @@ class SSN(Optimizer):
         gamma: float,
         th: float = 0.5,
         lr: float = 1.0,
-        max_ls_iter: int = 30000,
-        tolerance_ls: float = 1.0 + 1e-10,
+        max_ls_iter: int = 500,
+        tolerance_ls: float = 1.0 + 1e-8,
     ) -> None:
         defaults = {
             "lr": lr,
