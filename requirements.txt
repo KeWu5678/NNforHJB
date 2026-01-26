@@ -16,6 +16,7 @@ matplotlib>=3.5.0
 loguru>=0.6.0
 
 # Data Processing
+pandas>=2.0.0
 pickle5>=0.0.11; python_version < "3.8"
 
 # Optional: DeepXDE (if using the deepxde backend)

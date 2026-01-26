@@ -57,29 +57,36 @@ class PDPA:
             train_outerweights=True
         )
 
+        # Data split is done when the model is initialized
         self.data_train, self.data_valid = self.model1._prepare_data(data)
+        if self.model1.input_dim is None:
+            raise ValueError("Could not infer input dimension from data. Ensure data['x'] has shape (N, d).")
+        self.input_dim: int = int(self.model1.input_dim)
         
-    @staticmethod
-    def sample_uniform_sphere_points(N: int) -> Tuple[torch.Tensor, torch.Tensor]:
+    def sample_uniform_sphere_points(self, N: int) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Sample N points uniformly on the unit sphere (in R^3) and return a (x, y) + z
-        representation as torch tensors.
+        Sample N points uniformly on the unit sphere in R^(d+1), where d is the
+        input dimension inferred from the data, and return an (a, b) representation
+        where:
+        - a has shape (N, d) and corresponds to the linear weights
+        - b has shape (N,) and corresponds to the bias
         
         Args:
             N: Number of points to sample
             
         Returns:
             Tuple (a, b) where:
-            - a has shape (N, 2) and corresponds to (x, y)
-            - b has shape (N,) and corresponds to z
+            - a has shape (N, d)
+            - b has shape (N,)
         """
 
         # Hard-set float64 on CPU to match training data + network (.double()).
-        v = torch.randn(N, 3, dtype=torch.float64, device="cpu")
+        d = int(self.input_dim)
+        v = torch.randn(N, d + 1, dtype=torch.float64, device="cpu")
         v = v / v.norm(dim=1, keepdim=True).clamp_min(1e-12)
 
-        a = v[:, :2].contiguous()  # (N,2) -> (x,y)
-        b = v[:, 2].contiguous()   # (N,)  -> z
+        a = v[:, :d].contiguous()  # (N,d)
+        b = v[:, d].contiguous()   # (N,)
         return a, b
 
 
@@ -98,7 +105,7 @@ class PDPA:
             model: trained model in the last step. 
             N: number of neurons to be inserted
         return:
-            weights: np.ndarray, shape = (N, 2) for PyTorch linear layer
+            weights: np.ndarray, shape = (N, d) for PyTorch linear layer
             bias: np.ndarray, shape = (N,) for PyTorch linear layer
         """
         
@@ -167,12 +174,14 @@ class PDPA:
 
             Returns:
                 best_val: scalar tensor, the maximal value of profile(a, b) achieved.
-                best_a: tensor with shape (2,)
+                best_a: tensor with shape (d,)
                 best_b: scalar tensor
             """
             # Optimize an unconstrained 3D vector and evaluate the profile on its
             # projection onto the unit sphere (keeps the LBFGS line search stable).
-            w0 = torch.cat([a.reshape(-1), b.reshape(-1)]).detach()  # (3,)
+            # Here w has dimension (d+1): (a in R^d, b in R).
+            d = int(a.numel())
+            w0 = torch.cat([a.reshape(-1), b.reshape(-1)]).detach()  # (d+1,)
             w = w0.clone().requires_grad_(True)
 
             opt = torch.optim.LBFGS(
@@ -188,7 +197,7 @@ class PDPA:
                 opt.zero_grad()
                 w_sphere = w / w.norm().clamp_min(eps)
                 # LBFGS minimizes; we want to maximize the profile.
-                obj = profile(w_sphere[:2], w_sphere[2])
+                obj = profile(w_sphere[:d], w_sphere[d])
                 (-obj).backward()
                 return -obj
 
@@ -198,10 +207,10 @@ class PDPA:
             # We still detach outputs since we don't need gradients here.
             with torch.enable_grad():
                 w_sphere = w / w.norm().clamp_min(eps)
-                val = profile(w_sphere[:2], w_sphere[2])
+                val = profile(w_sphere[:d], w_sphere[d])
             best_val = val.detach().clone()
-            best_a = w_sphere[:2].detach().clone()
-            best_b = w_sphere[2].detach().clone()
+            best_a = w_sphere[:d].detach().clone()
+            best_b = w_sphere[d].detach().clone()
 
             return best_val, best_a, best_b
 
@@ -224,7 +233,8 @@ class PDPA:
             logger.info(f"insertion - tried {tried} candidates, accepted {accepted} (alpha={alpha})")
 
         if len(accepted_a) == 0:
-            return np.empty((0, 2), dtype=np.float64), np.empty((0,), dtype=np.float64)
+            d = int(X_train.shape[1])
+            return np.empty((0, d), dtype=np.float64), np.empty((0,), dtype=np.float64)
 
         W = torch.stack(accepted_a, dim=0).detach().cpu().numpy()
         b = torch.stack(accepted_b, dim=0).detach().cpu().numpy()
@@ -280,8 +290,8 @@ class PDPA:
         num_iterations: int,
         num_insertion: int,
         threshold: float,
-        verbose: bool = True
-    ) -> int:
+        verbose: bool = True,
+    ) -> tuple[int, int]:
         
         # Track best model across all iterations
         best_iteration = 0
@@ -349,10 +359,15 @@ class PDPA:
             self.outer_weights.append(W_out_pruned.detach().to(device="cpu").clone())
             
             # logger.info(f"Recording...")
-            if self.model2.config['best_val_loss'] < best_val_loss:
-                best_val_loss = self.model2.config['best_val_loss']
+            # Choose the best iteration using the same validation loss we record on `self.val_loss`,
+            # i.e. the loss of the *pruned* snapshot we store for this outer iteration.
+            if val_loss_f < best_val_loss:
+                best_val_loss = val_loss_f
                 best_iteration = i
-                if verbose: logger.info(f"New best model found at iteration {i} with validation loss: {best_val_loss:.6f}")
+                if verbose:
+                    logger.info(
+                        f"New best model found at iteration {i} with pruned validation loss: {best_val_loss:.6f}"
+                    )
             
             # Insert neurons and train
             W_to_insert, b_to_insert = self.insertion(
@@ -363,4 +378,5 @@ class PDPA:
             W_hidden = torch.cat((W_hidden, W_to_insert_t), dim=0)
             b_hidden = torch.cat((b_hidden, b_to_insert_t), dim=0)
 
-        return best_iteration
+        best_neurons = int(self.inner_weights[best_iteration]["weight"].shape[0])
+        return best_iteration, best_neurons

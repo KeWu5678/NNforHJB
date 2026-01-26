@@ -1,10 +1,11 @@
 from __future__ import annotations
 from typing import Any, Mapping, Optional, Sequence, Tuple
+from pathlib import Path
+import os
+import pickle
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
-
-
 
 
 def _get_field(dataset: Any, name: str) -> np.ndarray:
@@ -225,117 +226,526 @@ def plot_vdp_value_with_gradient_arrows2d(
     return fig, ax
 
 
-def plot_pdpa_val_loss_histories_by_gamma(
-    model_dict: Mapping[str, Any],
+def print_experiment_hyperparameters(folder: str | os.PathLike[str]) -> None:
+    """
+    1) given a folder like 'models/experiment_1'
+    2) read all the pickle file (duplicate experiments of certain hyper parameter and saved model)
+    3) print out the hyper parameter
+
+    This expects the pickle structure used in the notebooks: a dict with keys like
+    'gammas', 'alpha', 'power', 'num_iteration', 'num_insertion', 'pruning_threshold', ...,
+    plus a PDPA list under 'pdpa_list_h1' or 'pdpa_list_l2'.
+    """
+    def _extract_hparams(d: Mapping[str, Any]) -> dict[str, Any]:
+        # Keep only the things you would call "hyperparameters" (not trained PDPA objects / outcomes).
+        wanted = ("gammas", "alpha", "power", "num_iteration", "num_insertion", "pruning_threshold")
+        out: dict[str, Any] = {}
+        for k in wanted:
+            if k not in d:
+                continue
+            if k == "gammas":
+                out[k] = np.asarray(d[k]).reshape(-1).tolist()
+            else:
+                out[k] = d[k]
+        return out
+
+    folder_path = Path(folder)
+    if not folder_path.exists() or not folder_path.is_dir():
+        raise FileNotFoundError(f"Folder not found or not a directory: {folder_path}")
+
+    pkl_files = sorted([p for p in folder_path.iterdir() if p.is_file() and p.suffix == ".pkl"])
+    if len(pkl_files) == 0:
+        print(f"[print_experiment_hyperparameters] No .pkl files found in: {folder_path}")
+        return
+
+    loaded: list[tuple[Path, dict[str, Any]]] = []
+    for p in pkl_files:
+        with open(p, "rb") as f:
+            model_dict = pickle.load(f)
+        if not isinstance(model_dict, Mapping):
+            raise TypeError(f"Pickle '{p.name}' is not a dict-like object; got {type(model_dict)}")
+        loaded.append((p, _extract_hparams(model_dict)))
+
+    # Print only once (they should be the same across duplicate experiments).
+    base_path, base_hparams = loaded[0]
+    print(f"=== {folder_path} ({len(loaded)} files) ===")
+    for k in sorted(base_hparams.keys(), key=str):
+        print(f"  {k}: {base_hparams[k]!r}")
+
+    # Warn if any file differs.
+    diffs: list[str] = []
+    for p, hp in loaded[1:]:
+        if hp != base_hparams:
+            diffs.append(p.name)
+    if len(diffs) > 0:
+        print(f"\n[warn] Hyperparameters differ in {len(diffs)} file(s): {diffs}")
+
+
+def build_best_val_loss_table_by_gamma(
+    folder: str | os.PathLike[str],
     *,
-    pdpa_key: str = "pdpa_list_h1",
+    pdpa_key: Optional[str] = None,
     gammas_key: str = "gammas",
-    title: str = "PDPA validation loss history by γ",
-    xlabel: str = "Iteration",
-    ylabel: str = "Validation loss",
-    logy: bool = False,
+    kind: str = "loss",
+) -> dict[str, Any]:
+    """
+    1) given a folder like 'models/experiment_1'
+    2) return a table with rows = different iteration, columns = different gamma
+    3) behavior depends on `kind`:
+       - kind="loss": average (across duplicate runs) of best-so-far validation loss:
+            best_val_loss[t] = min(pdpa.val_loss[:t+1])
+       - kind="neuron": average (across duplicate runs) of neuron count at the best-so-far iteration:
+            best_idx[t] = argmin(pdpa.val_loss[:t+1])
+            best_neurons[t] = pdpa.inner_weights[best_idx[t]]["weight"].shape[0]
+
+    Returns:
+      {
+        'gammas': np.ndarray shape (G,),
+        'iterations': np.ndarray shape (T,),
+        'best_val_loss_mean': np.ndarray shape (T, G) (NaN where missing),  # kept name for compatibility
+        'counts': np.ndarray shape (T, G) number of runs contributing,
+        'table_df': pandas DataFrame (optional, formatted strings),
+        'files': list[str]
+      }
+    """
+    if kind not in {"loss", "neuron"}:
+        raise ValueError(f"kind must be 'loss' or 'neuron', got {kind!r}")
+
+    def _pick_pdpa_key(d: Mapping[str, Any]) -> str:
+        if pdpa_key is not None:
+            if pdpa_key not in d:
+                raise KeyError(f"Requested pdpa_key '{pdpa_key}' not found. Available keys: {list(d.keys())}")
+            return pdpa_key
+        for cand in ("pdpa_list_h1", "pdpa_list_l2", "pdpa_list"):
+            if cand in d:
+                return cand
+        raise KeyError(
+            "Could not infer PDPA list key. Expected one of "
+            "('pdpa_list_h1', 'pdpa_list_l2', 'pdpa_list') in the pickle dict."
+        )
+
+    def _get_pdpa_for_index(gammas_arr: np.ndarray, pdpa_list_or_map: Any, i: int) -> Any:
+        if isinstance(pdpa_list_or_map, Mapping):
+            g = gammas_arr[i].item() if hasattr(gammas_arr[i], "item") else gammas_arr[i]
+            if g in pdpa_list_or_map:
+                return pdpa_list_or_map[g]
+            gs = str(g)
+            if gs in pdpa_list_or_map:
+                return pdpa_list_or_map[gs]
+            raise KeyError(f"pdpa map has no entry for gamma={g!r}. Keys: {list(pdpa_list_or_map.keys())[:10]}")
+        if not isinstance(pdpa_list_or_map, Sequence):
+            raise TypeError(f"PDPA container must be a sequence or mapping; got {type(pdpa_list_or_map)}")
+        if len(pdpa_list_or_map) != len(gammas_arr):
+            raise ValueError(f"Length mismatch: len(gammas)={len(gammas_arr)} vs len(pdpa_list)={len(pdpa_list_or_map)}")
+        return pdpa_list_or_map[i]
+
+    folder_path = Path(folder)
+    if not folder_path.exists() or not folder_path.is_dir():
+        raise FileNotFoundError(f"Folder not found or not a directory: {folder_path}")
+
+    pkl_files = sorted([p for p in folder_path.iterdir() if p.is_file() and p.suffix == ".pkl"])
+    if len(pkl_files) == 0:
+        raise FileNotFoundError(f"No .pkl files found in: {folder_path}")
+
+    loaded: list[tuple[Path, Mapping[str, Any], str]] = []
+    base_gammas: Optional[np.ndarray] = None
+    max_iters = 0
+
+    for p in pkl_files:
+        with open(p, "rb") as f:
+            model_dict = pickle.load(f)
+        if not isinstance(model_dict, Mapping):
+            raise TypeError(f"Pickle '{p.name}' is not a dict-like object; got {type(model_dict)}")
+
+        k_pdpa = _pick_pdpa_key(model_dict)
+        if gammas_key not in model_dict:
+            raise KeyError(f"Pickle '{p.name}' is missing key '{gammas_key}'")
+
+        gammas_arr = np.asarray(model_dict[gammas_key]).reshape(-1).astype(float)
+        if base_gammas is None:
+            base_gammas = gammas_arr.copy()
+        else:
+            # Duplicate experiments should share identical gamma grid (and ordering).
+            if base_gammas.shape != gammas_arr.shape or not np.allclose(base_gammas, gammas_arr, rtol=0.0, atol=0.0):
+                raise ValueError(
+                    f"Gamma list mismatch in '{p.name}'.\n"
+                    f"Expected: {base_gammas.tolist()}\n"
+                    f"Got:      {gammas_arr.tolist()}"
+                )
+
+        pdpa_list_or_map = model_dict[k_pdpa]
+        for i in range(len(gammas_arr)):
+            pdpa = _get_pdpa_for_index(gammas_arr, pdpa_list_or_map, i)
+            if not hasattr(pdpa, "val_loss"):
+                raise AttributeError(f"PDPA object for gamma={gammas_arr[i]} in '{p.name}' has no attribute 'val_loss'")
+            max_iters = max(max_iters, int(np.asarray(pdpa.val_loss).reshape(-1).shape[0]))
+
+        loaded.append((p, model_dict, k_pdpa))
+
+    assert base_gammas is not None
+    gammas = base_gammas
+    G = int(gammas.shape[0])
+
+    sums = np.zeros((max_iters, G), dtype=float)
+    counts = np.zeros((max_iters, G), dtype=int)
+
+    for p, model_dict, k_pdpa in loaded:
+        gammas_arr = np.asarray(model_dict[gammas_key]).reshape(-1).astype(float)
+        pdpa_list_or_map = model_dict[k_pdpa]
+        for i in range(len(gammas_arr)):
+            col = int(i)  # column is the gamma index (order preserved from the pickle)
+            pdpa = _get_pdpa_for_index(gammas_arr, pdpa_list_or_map, i)
+            val_loss = np.asarray(pdpa.val_loss, dtype=float).reshape(-1)
+            if val_loss.size == 0:
+                continue
+
+            safe = np.where(np.isfinite(val_loss), val_loss, np.inf)
+            best_so_far_loss = np.minimum.accumulate(safe)
+
+            if kind == "loss":
+                best_so_far = np.where(np.isfinite(best_so_far_loss), best_so_far_loss, np.nan)
+                for t in range(best_so_far.shape[0]):
+                    v = float(best_so_far[t])
+                    if not np.isfinite(v):
+                        continue
+                    sums[t, col] += v
+                    counts[t, col] += 1
+            else:
+                if not hasattr(pdpa, "inner_weights"):
+                    raise AttributeError(
+                        "kind='neuron' requires PDPA objects to have 'inner_weights' (list of per-iteration weights)."
+                    )
+                inner_weights = list(getattr(pdpa, "inner_weights"))
+                num_iters = min(int(best_so_far_loss.shape[0]), len(inner_weights))
+                if num_iters == 0:
+                    continue
+
+                # For each t, pick best_idx = argmin(loss[:t+1]) and record neuron count at that snapshot.
+                for t in range(num_iters):
+                    window = best_so_far_loss[: t + 1]
+                    if not np.any(np.isfinite(window)):
+                        continue
+                    best_idx = int(np.argmin(window))
+                    w = inner_weights[best_idx]["weight"]
+                    n = float(getattr(w, "shape")[0])
+                    if not np.isfinite(n):
+                        continue
+                    sums[t, col] += n
+                    counts[t, col] += 1
+
+    mean = np.full_like(sums, np.nan, dtype=float)
+    nonzero = counts > 0
+    mean[nonzero] = sums[nonzero] / counts[nonzero]
+
+    result = {
+        "gammas": gammas,
+        "iterations": np.arange(max_iters, dtype=int),
+        # rows = iteration, cols = gamma
+        "best_val_loss_mean": mean,
+        "table": mean,  # alias (more explicit name)
+        "counts": counts,
+        "files": [p.name for p in pkl_files],
+    }
+
+    # Optional: provide a nice DataFrame for notebook display.
+    try:
+        import pandas as pd  # type: ignore
+
+        df = pd.DataFrame(
+            mean,
+            index=[f"iter={t}" for t in range(max_iters)],
+            columns=[f"gamma={g:g}" for g in gammas],
+        )
+        # Minimal, predictable notebook output
+        fmt = "{:.2e}" if kind == "loss" else "{:.2f}"
+        df_fmt = df.copy()
+        for c in df_fmt.columns:
+            df_fmt[c] = df_fmt[c].map(lambda v: fmt.format(v) if np.isfinite(v) else "nan")
+        result["table_df"] = df_fmt
+    except Exception:
+        pass
+
+    return result
+
+
+def summarize_best_iteration_and_loss_by_gamma(
+    folder: str | os.PathLike[str],
+    *,
+    pdpa_key: Optional[str] = None,
+    gammas_key: str = "gammas",
+    best_iteration_key: Optional[str] = None,
+) -> dict[str, Any]:
+    """
+    Given a folder of duplicate experiment pickles, return a per-gamma summary table:
+
+    - rows: gamma values
+    - col 1: best_neurons (mean across runs, rounded to int)
+    - col 2: best_val_loss (mean across runs)
+
+    If the pickle contains a 'best_iteration_*' list (e.g. 'best_iteration_l2'),
+    that is used. Otherwise, best_iteration is computed as argmin(pdpa.val_loss).
+    best_val_loss is computed as min(pdpa.val_loss) (finite values only).
+    """
+
+    def _pick_pdpa_key(d: Mapping[str, Any]) -> str:
+        if pdpa_key is not None:
+            if pdpa_key not in d:
+                raise KeyError(f"Requested pdpa_key '{pdpa_key}' not found. Available keys: {list(d.keys())}")
+            return pdpa_key
+        for cand in ("pdpa_list_h1", "pdpa_list_l2", "pdpa_list"):
+            if cand in d:
+                return cand
+        raise KeyError(
+            "Could not infer PDPA list key. Expected one of "
+            "('pdpa_list_h1', 'pdpa_list_l2', 'pdpa_list') in the pickle dict."
+        )
+
+    def _pick_best_iteration_key(d: Mapping[str, Any]) -> Optional[str]:
+        if best_iteration_key is not None:
+            return best_iteration_key if best_iteration_key in d else None
+        for cand in ("best_iteration_l2", "best_iteration_h1", "best_iteration"):
+            if cand in d:
+                return cand
+        return None
+
+    def _get_pdpa_for_index(gammas_arr: np.ndarray, pdpa_list_or_map: Any, i: int) -> Any:
+        if isinstance(pdpa_list_or_map, Mapping):
+            g = gammas_arr[i].item() if hasattr(gammas_arr[i], "item") else gammas_arr[i]
+            if g in pdpa_list_or_map:
+                return pdpa_list_or_map[g]
+            gs = str(g)
+            if gs in pdpa_list_or_map:
+                return pdpa_list_or_map[gs]
+            raise KeyError(f"pdpa map has no entry for gamma={g!r}. Keys: {list(pdpa_list_or_map.keys())[:10]}")
+        if not isinstance(pdpa_list_or_map, Sequence):
+            raise TypeError(f"PDPA container must be a sequence or mapping; got {type(pdpa_list_or_map)}")
+        if len(pdpa_list_or_map) != len(gammas_arr):
+            raise ValueError(f"Length mismatch: len(gammas)={len(gammas_arr)} vs len(pdpa_list)={len(pdpa_list_or_map)}")
+        return pdpa_list_or_map[i]
+
+    folder_path = Path(folder)
+    if not folder_path.exists() or not folder_path.is_dir():
+        raise FileNotFoundError(f"Folder not found or not a directory: {folder_path}")
+
+    pkl_files = sorted([p for p in folder_path.iterdir() if p.is_file() and p.suffix == ".pkl"])
+    if len(pkl_files) == 0:
+        raise FileNotFoundError(f"No .pkl files found in: {folder_path}")
+
+    gammas: Optional[np.ndarray] = None
+    best_iter_lists: list[list[float]] = []
+    best_neuron_lists: list[list[float]] = []
+    best_loss_lists: list[list[float]] = []
+
+    for p in pkl_files:
+        with open(p, "rb") as f:
+            d = pickle.load(f)
+        if not isinstance(d, Mapping):
+            raise TypeError(f"Pickle '{p.name}' is not a dict-like object; got {type(d)}")
+        if gammas_key not in d:
+            raise KeyError(f"Pickle '{p.name}' is missing key '{gammas_key}'")
+
+        gammas_arr = np.asarray(d[gammas_key]).reshape(-1).astype(float)
+        if gammas is None:
+            gammas = gammas_arr.copy()
+        else:
+            if gammas.shape != gammas_arr.shape or not np.allclose(gammas, gammas_arr, rtol=0.0, atol=0.0):
+                raise ValueError(
+                    f"Gamma list mismatch in '{p.name}'.\n"
+                    f"Expected: {gammas.tolist()}\n"
+                    f"Got:      {gammas_arr.tolist()}"
+                )
+
+        k_pdpa = _pick_pdpa_key(d)
+        pdpa_list_or_map = d[k_pdpa]
+        k_best_it = _pick_best_iteration_key(d)
+        best_it_list = d.get(k_best_it) if k_best_it is not None else None
+
+        file_best_iters: list[float] = []
+        file_best_neurons: list[float] = []
+        file_best_losses: list[float] = []
+        for i in range(len(gammas_arr)):
+            pdpa = _get_pdpa_for_index(gammas_arr, pdpa_list_or_map, i)
+            val_loss = np.asarray(getattr(pdpa, "val_loss"), dtype=float).reshape(-1)
+            safe = np.where(np.isfinite(val_loss), val_loss, np.inf)
+            if safe.size == 0 or not np.any(np.isfinite(safe)):
+                file_best_losses.append(np.nan)
+                file_best_iters.append(np.nan)
+                file_best_neurons.append(np.nan)
+                continue
+
+            best_loss = float(np.min(safe))
+            if best_it_list is not None and isinstance(best_it_list, Sequence) and len(best_it_list) == len(gammas_arr):
+                best_it = float(best_it_list[i])
+            else:
+                best_it = float(int(np.argmin(safe)))
+
+            file_best_losses.append(best_loss)
+            file_best_iters.append(best_it)
+
+            # Neuron count at the best iteration snapshot.
+            try:
+                inner_weights = list(getattr(pdpa, "inner_weights"))
+                it_int = int(np.rint(best_it))
+                if it_int < 0 or it_int >= len(inner_weights):
+                    file_best_neurons.append(np.nan)
+                else:
+                    w = inner_weights[it_int]["weight"]
+                    file_best_neurons.append(float(getattr(w, "shape")[0]))
+            except Exception:
+                file_best_neurons.append(np.nan)
+
+        best_iter_lists.append(file_best_iters)
+        best_neuron_lists.append(file_best_neurons)
+        best_loss_lists.append(file_best_losses)
+
+    assert gammas is not None
+    best_iters_arr = np.asarray(best_iter_lists, dtype=float)  # (R, G)
+    best_neurons_arr = np.asarray(best_neuron_lists, dtype=float)  # (R, G)
+    best_losses_arr = np.asarray(best_loss_lists, dtype=float)  # (R, G)
+
+    best_iter_mean = np.nanmean(best_iters_arr, axis=0)
+    best_neuron_mean = np.nanmean(best_neurons_arr, axis=0)
+    best_loss_mean = np.nanmean(best_losses_arr, axis=0)
+
+    # "round up to integer" -> round to nearest int (NaN stays NaN)
+    best_iter_mean_int = np.where(np.isfinite(best_iter_mean), np.rint(best_iter_mean), np.nan).astype(float)
+    best_neuron_mean_int = np.where(np.isfinite(best_neuron_mean), np.rint(best_neuron_mean), np.nan).astype(float)
+
+    result: dict[str, Any] = {
+        "gammas": gammas,
+        # Kept for debugging/back-compat, but prefer best_neurons_mean for reporting.
+        "best_iteration_mean": best_iter_mean_int,
+        "best_neurons_mean": best_neuron_mean_int,
+        "best_val_loss_mean": best_loss_mean,
+        "files": [p.name for p in pkl_files],
+    }
+
+    try:
+        import pandas as pd  # type: ignore
+
+        df = pd.DataFrame(
+            {"best_neurons": best_neuron_mean_int, "best_val_loss": best_loss_mean},
+            index=[f"gamma={g:g}" for g in gammas],
+        )
+        df_fmt = df.copy()
+        df_fmt["best_neurons"] = df_fmt["best_neurons"].map(lambda v: f"{v:.0f}" if np.isfinite(v) else "nan")
+        # Scientific notation, 2 digits after decimal (e.g. 1.23e-02).
+        df_fmt["best_val_loss"] = df_fmt["best_val_loss"].map(lambda v: f"{v:.2e}" if np.isfinite(v) else "nan")
+        result["table_df"] = df_fmt
+    except Exception:
+        pass
+
+    return result
+
+
+def plot_best_loss_vs_best_neurons_by_gamma(
+    folder: str | os.PathLike[str],
+    *,
+    pdpa_key: Optional[str] = None,
+    gammas_key: str = "gammas",
+    gammas_include: Optional[Sequence[float]] = None,
     ax: Optional[plt.Axes] = None,
+    title: str = "Best-so-far loss vs best-so-far neurons (avg across runs)",
+    xlabel: str = "Avg best-so-far neuron count",
+    ylabel: str = "Avg best-so-far validation loss",
+    logy: bool = False,
     legend: bool = True,
     linewidth: float = 1.8,
     alpha: float = 0.95,
+    marker: Optional[str] = None,
+    markersize: float = 4.0,
 ) -> Tuple[plt.Figure, plt.Axes]:
     """
-    Plot PDPA validation-loss histories for each gamma on a single figure.
+    For each gamma (one line), plot:
+      x-axis: average best-so-far neuron count at iteration t
+      y-axis: average best-so-far validation loss at iteration t
 
-    Expects a dict like in `notebook/pdpa_vdp.ipynb`:
-        {
-            "gammas": gammas,
-            "pdpa_list_h1": pdpa_list_h1,
-        }
+    Data is computed from all .pkl files in the folder (duplicate runs) using the
+    existing `build_best_val_loss_table_by_gamma(..., kind=...)`.
 
-    For each gamma, this plots the corresponding `pdpa.val_loss` sequence.
-
-    Args:
-        model_dict: dict-like with keys `gammas_key` and `pdpa_key`
-        pdpa_key: key containing either a list/tuple aligned with gammas, or a dict mapping gamma -> PDPA
-        gammas_key: key containing gamma values
-        logy: if True, use log scale on y-axis
-        ax: optional axes to plot into
-
-    Returns:
-        (fig, ax)
+    If `gammas_include` is provided, only plot lines for gamma values in that list.
     """
+    loss_out = build_best_val_loss_table_by_gamma(folder, pdpa_key=pdpa_key, gammas_key=gammas_key, kind="loss")
+    neu_out = build_best_val_loss_table_by_gamma(folder, pdpa_key=pdpa_key, gammas_key=gammas_key, kind="neuron")
 
-    if gammas_key not in model_dict:
-        raise KeyError(f"model_dict is missing key '{gammas_key}'. Available: {list(model_dict.keys())}")
-    if pdpa_key not in model_dict:
-        raise KeyError(f"model_dict is missing key '{pdpa_key}'. Available: {list(model_dict.keys())}")
+    gammas = np.asarray(loss_out["gammas"], dtype=float).reshape(-1)
+    gammas2 = np.asarray(neu_out["gammas"], dtype=float).reshape(-1)
+    if gammas.shape != gammas2.shape or not np.allclose(gammas, gammas2, rtol=0.0, atol=0.0):
+        raise ValueError("Gamma lists differ between loss and neuron aggregation outputs.")
 
-    gammas = model_dict[gammas_key]
-    pdpa_list_or_map = model_dict[pdpa_key]
-
-    gammas_arr = np.asarray(gammas).reshape(-1)
+    loss_tbl = np.asarray(loss_out["table"], dtype=float)  # (T, G)
+    neu_tbl = np.asarray(neu_out["table"], dtype=float)  # (T, G)
 
     if ax is None:
         fig, ax = plt.subplots(figsize=(10, 6))
     else:
         fig = ax.figure
 
-    # Resolve (gamma -> pdpa) for both common formats:
-    # - list/tuple aligned with gammas
-    # - dict mapping gamma -> pdpa
-    if isinstance(pdpa_list_or_map, Mapping):
-        def get_pdpa(i: int) -> Any:
-            g = gammas_arr[i].item() if hasattr(gammas_arr[i], "item") else gammas_arr[i]
-            if g in pdpa_list_or_map:
-                return pdpa_list_or_map[g]
-            # fallback: try stringified keys (e.g. JSON saved dicts)
-            gs = str(g)
-            if gs in pdpa_list_or_map:
-                return pdpa_list_or_map[gs]
-            raise KeyError(f"pdpa map has no entry for gamma={g!r}. Keys: {list(pdpa_list_or_map.keys())[:10]}")
-    else:
-        if not isinstance(pdpa_list_or_map, Sequence):
-            raise TypeError(
-                f"model_dict['{pdpa_key}'] must be a sequence (aligned with gammas) or a mapping gamma->pdpa; "
-                f"got {type(pdpa_list_or_map)}"
-            )
-        if len(pdpa_list_or_map) != len(gammas_arr):
-            raise ValueError(
-                f"Length mismatch: len(gammas)={len(gammas_arr)} but len({pdpa_key})={len(pdpa_list_or_map)}"
-            )
-
-        def get_pdpa(i: int) -> Any:
-            return pdpa_list_or_map[i]
+    include_set = None
+    if gammas_include is not None:
+        include_set = set(float(x) for x in gammas_include)
 
     plotted = 0
-    for i in range(len(gammas_arr)):
-        gamma = gammas_arr[i]
-        pdpa = get_pdpa(i)
-        if not hasattr(pdpa, "val_loss"):
-            raise AttributeError(f"PDPA object for gamma={gamma} has no attribute 'val_loss'")
-
-        y = np.asarray(getattr(pdpa, "val_loss"), dtype=float).reshape(-1)
-        if y.size == 0:
+    for j, g in enumerate(gammas):
+        if include_set is not None and float(g) not in include_set:
             continue
-
-        x = np.arange(y.size)
+        xs = neu_tbl[:, j]
+        ys = loss_tbl[:, j]
+        finite = np.isfinite(xs) & np.isfinite(ys)
+        if not np.any(finite):
+            continue
+        xs_f = xs[finite]
+        ys_f = ys[finite]
         ax.plot(
-            x,
-            y,
+            xs_f,
+            ys_f,
             linewidth=linewidth,
             alpha=alpha,
-            label=fr"$\gamma$={float(gamma):g}",
+            marker=marker,
+            markersize=markersize,
+            label=fr"$\gamma$={float(g):g}",
         )
+
+        # Mark the end point (last iteration): this corresponds to the best iteration reached so far.
+        end_x = float(xs_f[-1])
+        end_y = float(ys_f[-1])
+        ax.scatter([end_x], [end_y], s=120, marker="o", edgecolors="black", linewidths=1.0, zorder=6)
+        ax.annotate(
+            f"{end_x:.0f}",
+            (end_x, end_y),
+            xytext=(6, 6),
+            textcoords="offset points",
+            fontsize=9,
+            fontweight="bold",
+        )
+
         plotted += 1
 
     if plotted == 0:
-        raise ValueError("No non-empty pdpa.val_loss histories found to plot.")
+        raise ValueError("No finite (neuron, loss) points to plot.")
 
     ax.set_title(title)
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
-    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     ax.grid(True, alpha=0.25)
     if logy:
         ax.set_yscale("log")
     if legend:
-        ax.legend(frameon=False)
+        from matplotlib.lines import Line2D
+
+        dot = Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="w",
+            label="best iteration reached",
+            markerfacecolor="black",
+            markeredgecolor="black",
+            markersize=10,
+            linewidth=0,
+        )
+        handles, labels = ax.get_legend_handles_labels()
+        ax.legend(handles + [dot], labels + [dot.get_label()], frameon=False)
     fig.tight_layout()
     return fig, ax
 

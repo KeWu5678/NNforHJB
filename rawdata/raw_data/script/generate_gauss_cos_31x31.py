@@ -106,10 +106,16 @@ def generate_gauss_cos_random(
 
 
 def main():
-    out_dir = os.path.dirname(os.path.abspath(__file__))
-    out_path = os.path.join(out_dir, 'gauss_cos_31x31.npy')
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    out_dir = os.path.join(script_dir, "..", "data")
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, "gauss_cos_31x31.npy")
     # Generate 1000 random points (keeps filename for notebook compatibility).
-    data = generate_gauss_cos_random(n_samples=1000, seed=0, low=-1.0, high=1.0)
+    # data = generate_gauss_cos_random(n_samples=1000, seed=0, low=-1.0, high=1.0)
+    data = generate_gauss_cos_grid()
+    # Shuffle datapoints (deterministic order for reproducibility).
+    rng = np.random.default_rng(0)
+    data = data[rng.permutation(data.shape[0])]
     np.save(out_path, data)
     print(f"Saved dataset with shape {data.shape}, dtype: {data.dtype} to {out_path}")
 

@@ -59,6 +59,7 @@ class model:
         self.verbose = verbose
         # network parameters
         self.train_outerweights = train_outerweights
+        self.input_dim: Optional[int] = None
         
         # Initialize training components
         self.net = None
@@ -91,6 +92,11 @@ class model:
                 "  data = {'x': x_array, 'v': v_array, 'dv': dv_array}"
             )
         
+        # Record input dimension for network creation
+        if hasattr(ob_x, "ndim") and ob_x.ndim < 2:
+            raise ValueError(f"Expected 'x' to be 2D with shape (N, d); got shape {getattr(ob_x, 'shape', None)}")
+        self.input_dim = int(ob_x.shape[1])
+
         # Split data into training and validation sets
         split_idx = int(len(ob_x) * self.training_percentage)
         train_x, valid_x = ob_x[:split_idx], ob_x[split_idx:]
@@ -129,6 +135,13 @@ class model:
             inner_bias: Pre-defined inner bias (frozen)
             outer_weights: Pre-defined outer weights (trainable)
         """
+        if inner_weights is not None:
+            input_dim = int(inner_weights.shape[1])
+        else:
+            if self.input_dim is None:
+                raise ValueError("input_dim is not set. Call _prepare_data() before training or pass inner_weights.")
+            input_dim = int(self.input_dim)
+
         if self.train_outerweights == False:
             if inner_weights is None:
                 # Default case - will be handled by ShallowNetwork, create a network with 30 neurons
@@ -141,7 +154,7 @@ class model:
         
         # Create the shallow network
             self.net = ShallowNetwork(
-                [2, n, 1], 
+                [input_dim, n, 1], 
                 self.activation,
                 p=self.power, 
                 inner_weights=inner_weights, inner_bias=inner_bias, outer_weights=outer_weights
@@ -152,7 +165,7 @@ class model:
             else:
                 n = inner_weights.shape[0]
             self.net = ShallowNetwork(
-                [2, n, 1], 
+                [input_dim, n, 1], 
                 self.activation, 
                 p=self.power, 
                 inner_weights=inner_weights, inner_bias=inner_bias, outer_weights=outer_weights
@@ -315,10 +328,10 @@ class model:
             if epoch % display_every == 0:
                 if self.verbose:
                     logger.info(f"Epoch {epoch}: Train Loss = {loss.item():.6f}, "f"Val Loss = {val_loss.item():.6f}")
-                # self.loss_history['train_loss'].append(loss.item())
-                # self.loss_history['val_loss'].append(val_loss.item())
-                # self.loss_history['value_loss'].append(val_value_loss.item())
-                # self.loss_history['grad_loss'].append(val_grad_loss.item())
+                self.loss_history['train_loss'].append(loss.item())
+                self.loss_history['val_loss'].append(val_loss.item())
+                self.loss_history['value_loss'].append(val_value_loss.item())
+                self.loss_history['grad_loss'].append(val_grad_loss.item())
 
         
         # Restore the best model before returning and report best loss
@@ -328,11 +341,11 @@ class model:
 
         # Persist a small training summary for downstream code (e.g. PDPA.retrain)
         # Keep this lightweight (do not store the full state_dict in config/history).
-        self.config = {
-            "best_val_loss": float(best_val_loss),
-            "best_epoch": int(best_epoch),
-            "iterations": int(iterations),
-            "optimizer": str(self.optimizer_type),
-            "train_outerweights": bool(self.train_outerweights),
-        }
+        # self.config = {
+        #     "best_val_loss": float(best_val_loss),
+        #     "best_epoch": int(best_epoch),
+        #     "iterations": int(iterations),
+        #     "optimizer": str(self.optimizer_type),
+        #     "train_outerweights": bool(self.train_outerweights),
+        # }
         
