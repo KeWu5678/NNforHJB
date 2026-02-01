@@ -7,7 +7,6 @@ def _to_boundary(x: torch.Tensor, d: torch.Tensor, s: float) -> tuple[torch.Tens
     the trust-region boundary projection: Project x + tau d to the trust-region boundary |x| = s by solving for tau.
     In the algorithm, we should have
     |x| <= s, |x + tau d| <= s
-    This matches the MATLAB helper to_boundary in mpcg.m.
     Returns the updated x and the step length tau used.
     """
     # Scalars used in quadratic for tau

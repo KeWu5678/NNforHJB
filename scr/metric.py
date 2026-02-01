@@ -287,22 +287,27 @@ def build_best_val_loss_table_by_gamma(
     pdpa_key: Optional[str] = None,
     gammas_key: str = "gammas",
     kind: str = "loss",
+    loss: str = "valid",
 ) -> dict[str, Any]:
     """
-    1) given a folder like 'models/experiment_1'
+    1) given a folder like 'models/experiment_1' OR a single '.pkl' file path
     2) return a table with rows = different iteration, columns = different gamma
     3) behavior depends on `kind`:
-       - kind="loss": average (across duplicate runs) of best-so-far validation loss:
-            best_val_loss[t] = min(pdpa.val_loss[:t+1])
+       - kind="loss": average (across duplicate runs) of best-so-far loss:
+            best_loss[t] = min(loss_hist[:t+1])
        - kind="neuron": average (across duplicate runs) of neuron count at the best-so-far iteration:
-            best_idx[t] = argmin(pdpa.val_loss[:t+1])
+            best_idx[t] = argmin(loss_hist[:t+1])
             best_neurons[t] = pdpa.inner_weights[best_idx[t]]["weight"].shape[0]
+
+    If a single '.pkl' file path is provided, the output corresponds to that one run
+    (i.e. the "average across runs" is just the run itself).
 
     Returns:
       {
         'gammas': np.ndarray shape (G,),
         'iterations': np.ndarray shape (T,),
-        'best_val_loss_mean': np.ndarray shape (T, G) (NaN where missing),  # kept name for compatibility
+        'best_val_loss_mean': np.ndarray shape (T, G) (NaN where missing),  # valid-only, kept name for compatibility
+        'best_train_loss_mean': np.ndarray shape (T, G) (NaN where missing),  # only when loss="train"
         'counts': np.ndarray shape (T, G) number of runs contributing,
         'table_df': pandas DataFrame (optional, formatted strings),
         'files': list[str]
@@ -310,6 +315,10 @@ def build_best_val_loss_table_by_gamma(
     """
     if kind not in {"loss", "neuron"}:
         raise ValueError(f"kind must be 'loss' or 'neuron', got {kind!r}")
+    if loss not in {"valid", "train"}:
+        raise ValueError(f"loss must be 'valid' or 'train', got {loss!r}")
+
+    loss_attr = "val_loss" if loss == "valid" else "train_loss"
 
     def _pick_pdpa_key(d: Mapping[str, Any]) -> str:
         if pdpa_key is not None:
@@ -339,13 +348,19 @@ def build_best_val_loss_table_by_gamma(
             raise ValueError(f"Length mismatch: len(gammas)={len(gammas_arr)} vs len(pdpa_list)={len(pdpa_list_or_map)}")
         return pdpa_list_or_map[i]
 
-    folder_path = Path(folder)
-    if not folder_path.exists() or not folder_path.is_dir():
-        raise FileNotFoundError(f"Folder not found or not a directory: {folder_path}")
-
-    pkl_files = sorted([p for p in folder_path.iterdir() if p.is_file() and p.suffix == ".pkl"])
-    if len(pkl_files) == 0:
-        raise FileNotFoundError(f"No .pkl files found in: {folder_path}")
+    input_path = Path(folder)
+    if not input_path.exists():
+        raise FileNotFoundError(f"Path not found: {input_path}")
+    if input_path.is_dir():
+        pkl_files = sorted([p for p in input_path.iterdir() if p.is_file() and p.suffix == ".pkl"])
+        if len(pkl_files) == 0:
+            raise FileNotFoundError(f"No .pkl files found in directory: {input_path}")
+    elif input_path.is_file():
+        if input_path.suffix != ".pkl":
+            raise ValueError(f"Expected a directory or a '.pkl' file, got: {input_path}")
+        pkl_files = [input_path]
+    else:
+        raise FileNotFoundError(f"Path is neither a file nor a directory: {input_path}")
 
     loaded: list[tuple[Path, Mapping[str, Any], str]] = []
     base_gammas: Optional[np.ndarray] = None
@@ -376,9 +391,11 @@ def build_best_val_loss_table_by_gamma(
         pdpa_list_or_map = model_dict[k_pdpa]
         for i in range(len(gammas_arr)):
             pdpa = _get_pdpa_for_index(gammas_arr, pdpa_list_or_map, i)
-            if not hasattr(pdpa, "val_loss"):
-                raise AttributeError(f"PDPA object for gamma={gammas_arr[i]} in '{p.name}' has no attribute 'val_loss'")
-            max_iters = max(max_iters, int(np.asarray(pdpa.val_loss).reshape(-1).shape[0]))
+            if not hasattr(pdpa, loss_attr):
+                raise AttributeError(
+                    f"PDPA object for gamma={gammas_arr[i]} in '{p.name}' has no attribute '{loss_attr}'"
+                )
+            max_iters = max(max_iters, int(np.asarray(getattr(pdpa, loss_attr)).reshape(-1).shape[0]))
 
         loaded.append((p, model_dict, k_pdpa))
 
@@ -395,11 +412,11 @@ def build_best_val_loss_table_by_gamma(
         for i in range(len(gammas_arr)):
             col = int(i)  # column is the gamma index (order preserved from the pickle)
             pdpa = _get_pdpa_for_index(gammas_arr, pdpa_list_or_map, i)
-            val_loss = np.asarray(pdpa.val_loss, dtype=float).reshape(-1)
-            if val_loss.size == 0:
+            loss_hist = np.asarray(getattr(pdpa, loss_attr), dtype=float).reshape(-1)
+            if loss_hist.size == 0:
                 continue
 
-            safe = np.where(np.isfinite(val_loss), val_loss, np.inf)
+            safe = np.where(np.isfinite(loss_hist), loss_hist, np.inf)
             best_so_far_loss = np.minimum.accumulate(safe)
 
             if kind == "loss":
@@ -437,13 +454,15 @@ def build_best_val_loss_table_by_gamma(
     nonzero = counts > 0
     mean[nonzero] = sums[nonzero] / counts[nonzero]
 
+    result_loss_key = "best_val_loss_mean" if loss == "valid" else "best_train_loss_mean"
     result = {
         "gammas": gammas,
         "iterations": np.arange(max_iters, dtype=int),
         # rows = iteration, cols = gamma
-        "best_val_loss_mean": mean,
+        result_loss_key: mean,
         "table": mean,  # alias (more explicit name)
         "counts": counts,
+        "loss": loss,
         "files": [p.name for p in pkl_files],
     }
 
@@ -474,18 +493,22 @@ def summarize_best_iteration_and_loss_by_gamma(
     pdpa_key: Optional[str] = None,
     gammas_key: str = "gammas",
     best_iteration_key: Optional[str] = None,
+    loss: str = "valid",
 ) -> dict[str, Any]:
     """
     Given a folder of duplicate experiment pickles, return a per-gamma summary table:
 
     - rows: gamma values
     - col 1: best_neurons (mean across runs, rounded to int)
-    - col 2: best_val_loss (mean across runs)
+    - col 2: best_(val|train)_loss (mean across runs)
 
     If the pickle contains a 'best_iteration_*' list (e.g. 'best_iteration_l2'),
-    that is used. Otherwise, best_iteration is computed as argmin(pdpa.val_loss).
-    best_val_loss is computed as min(pdpa.val_loss) (finite values only).
+    that is used when loss="valid". Otherwise, best_iteration is computed as argmin(loss_hist).
+    Best loss is computed as min(loss_hist) (finite values only).
     """
+    if loss not in {"valid", "train"}:
+        raise ValueError(f"loss must be 'valid' or 'train', got {loss!r}")
+    loss_attr = "val_loss" if loss == "valid" else "train_loss"
 
     def _pick_pdpa_key(d: Mapping[str, Any]) -> str:
         if pdpa_key is not None:
@@ -558,15 +581,15 @@ def summarize_best_iteration_and_loss_by_gamma(
         k_pdpa = _pick_pdpa_key(d)
         pdpa_list_or_map = d[k_pdpa]
         k_best_it = _pick_best_iteration_key(d)
-        best_it_list = d.get(k_best_it) if k_best_it is not None else None
+        best_it_list = d.get(k_best_it) if (loss == "valid" and k_best_it is not None) else None
 
         file_best_iters: list[float] = []
         file_best_neurons: list[float] = []
         file_best_losses: list[float] = []
         for i in range(len(gammas_arr)):
             pdpa = _get_pdpa_for_index(gammas_arr, pdpa_list_or_map, i)
-            val_loss = np.asarray(getattr(pdpa, "val_loss"), dtype=float).reshape(-1)
-            safe = np.where(np.isfinite(val_loss), val_loss, np.inf)
+            loss_hist = np.asarray(getattr(pdpa, loss_attr), dtype=float).reshape(-1)
+            safe = np.where(np.isfinite(loss_hist), loss_hist, np.inf)
             if safe.size == 0 or not np.any(np.isfinite(safe)):
                 file_best_losses.append(np.nan)
                 file_best_iters.append(np.nan)
@@ -611,26 +634,29 @@ def summarize_best_iteration_and_loss_by_gamma(
     best_iter_mean_int = np.where(np.isfinite(best_iter_mean), np.rint(best_iter_mean), np.nan).astype(float)
     best_neuron_mean_int = np.where(np.isfinite(best_neuron_mean), np.rint(best_neuron_mean), np.nan).astype(float)
 
+    result_loss_key = "best_val_loss_mean" if loss == "valid" else "best_train_loss_mean"
     result: dict[str, Any] = {
         "gammas": gammas,
         # Kept for debugging/back-compat, but prefer best_neurons_mean for reporting.
         "best_iteration_mean": best_iter_mean_int,
         "best_neurons_mean": best_neuron_mean_int,
-        "best_val_loss_mean": best_loss_mean,
+        result_loss_key: best_loss_mean,
+        "loss": loss,
         "files": [p.name for p in pkl_files],
     }
 
     try:
         import pandas as pd  # type: ignore
 
+        loss_col = "best_val_loss" if loss == "valid" else "best_train_loss"
         df = pd.DataFrame(
-            {"best_neurons": best_neuron_mean_int, "best_val_loss": best_loss_mean},
+            {"best_neurons": best_neuron_mean_int, loss_col: best_loss_mean},
             index=[f"gamma={g:g}" for g in gammas],
         )
         df_fmt = df.copy()
         df_fmt["best_neurons"] = df_fmt["best_neurons"].map(lambda v: f"{v:.0f}" if np.isfinite(v) else "nan")
         # Scientific notation, 2 digits after decimal (e.g. 1.23e-02).
-        df_fmt["best_val_loss"] = df_fmt["best_val_loss"].map(lambda v: f"{v:.2e}" if np.isfinite(v) else "nan")
+        df_fmt[loss_col] = df_fmt[loss_col].map(lambda v: f"{v:.2e}" if np.isfinite(v) else "nan")
         result["table_df"] = df_fmt
     except Exception:
         pass
@@ -645,28 +671,36 @@ def plot_best_loss_vs_best_neurons_by_gamma(
     gammas_key: str = "gammas",
     gammas_include: Optional[Sequence[float]] = None,
     ax: Optional[plt.Axes] = None,
-    title: str = "Best-so-far loss vs best-so-far neurons (avg across runs)",
+    title: str = "Best-so-far loss vs best-so-far neurons (avg across runs; single file plots one run)",
     xlabel: str = "Avg best-so-far neuron count",
     ylabel: str = "Avg best-so-far validation loss",
     logy: bool = False,
     legend: bool = True,
     linewidth: float = 1.8,
     alpha: float = 0.95,
-    marker: Optional[str] = None,
+    marker: Optional[str] = "o",
     markersize: float = 4.0,
+    loss: str = "valid",
 ) -> Tuple[plt.Figure, plt.Axes]:
     """
     For each gamma (one line), plot:
       x-axis: average best-so-far neuron count at iteration t
       y-axis: average best-so-far validation loss at iteration t
 
-    Data is computed from all .pkl files in the folder (duplicate runs) using the
-    existing `build_best_val_loss_table_by_gamma(..., kind=...)`.
+    Input can be either:
+    - a directory containing multiple '.pkl' files (duplicate runs), or
+    - a single '.pkl' file (plots that single run).
+
+    Data is computed using `build_best_val_loss_table_by_gamma(..., kind=...)`.
 
     If `gammas_include` is provided, only plot lines for gamma values in that list.
     """
-    loss_out = build_best_val_loss_table_by_gamma(folder, pdpa_key=pdpa_key, gammas_key=gammas_key, kind="loss")
-    neu_out = build_best_val_loss_table_by_gamma(folder, pdpa_key=pdpa_key, gammas_key=gammas_key, kind="neuron")
+    loss_out = build_best_val_loss_table_by_gamma(
+        folder, pdpa_key=pdpa_key, gammas_key=gammas_key, kind="loss", loss=loss
+    )
+    neu_out = build_best_val_loss_table_by_gamma(
+        folder, pdpa_key=pdpa_key, gammas_key=gammas_key, kind="neuron", loss=loss
+    )
 
     gammas = np.asarray(loss_out["gammas"], dtype=float).reshape(-1)
     gammas2 = np.asarray(neu_out["gammas"], dtype=float).reshape(-1)
@@ -727,6 +761,8 @@ def plot_best_loss_vs_best_neurons_by_gamma(
     ax.set_title(title)
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
+    # Neuron counts are discrete; keep x-axis ticks as integers.
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     ax.grid(True, alpha=0.25)
     if logy:
         ax.set_yscale("log")

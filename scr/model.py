@@ -268,6 +268,7 @@ class model:
         self.loss_history = {'train_loss': [], 'val_loss': [], 'value_loss': [], 'grad_loss': []}
         # Track and save running best model by validation loss
         best_val_loss = float('inf')
+        best_train_loss = float('inf')
         best_epoch = -1
         # Ensure best_state is always defined (e.g. iterations == 0)
         best_state = {k: v.detach().clone() for k, v in self.net.state_dict().items()}
@@ -296,12 +297,19 @@ class model:
 
             # Save running best model
             # self.net.eval() # set to evaluation mode (not be needed since always full patch)
-            val_loss, val_value_loss, val_grad_loss = self._compute_loss(valid_x_tensor, valid_v_tensor, valid_dv_tensor)
-            if val_loss.item() < best_val_loss:
-                best_val_loss = val_loss.item()
+            train_loss, train_value_loss, train_grad_loss = self._compute_loss(train_x_tensor, train_v_tensor, train_dv_tensor)
+            if train_loss.item() < best_train_loss:
+                best_train_loss = train_loss.item()
                 best_epoch = epoch
                 # Snapshot a real checkpoint (not just a view into current params)
                 best_state = {k: v.detach().clone() for k, v in self.net.state_dict().items()}
+
+            val_loss, val_value_loss, val_grad_loss = self._compute_loss(valid_x_tensor, valid_v_tensor, valid_dv_tensor)
+            # if val_loss.item() < best_val_loss:
+            #     best_val_loss = val_loss.item()
+            #     best_epoch = epoch
+            #     # Snapshot a real checkpoint (not just a view into current params)
+            #     best_state = {k: v.detach().clone() for k, v in self.net.state_dict().items()}
 
             # Early-stop SSN training if line search fails repeatedly
             if isinstance(self.optimizer, (SSN, SSN_TR)):
@@ -324,7 +332,7 @@ class model:
                         )
                     break
             
-            # Validation loss for logging
+            # log the loss
             if epoch % display_every == 0:
                 if self.verbose:
                     logger.info(f"Epoch {epoch}: Train Loss = {loss.item():.6f}, "f"Val Loss = {val_loss.item():.6f}")
@@ -339,13 +347,4 @@ class model:
         if self.verbose:
             logger.info(f"Best validation loss: {best_val_loss:.6f} at iteration {best_epoch}")
 
-        # Persist a small training summary for downstream code (e.g. PDPA.retrain)
-        # Keep this lightweight (do not store the full state_dict in config/history).
-        # self.config = {
-        #     "best_val_loss": float(best_val_loss),
-        #     "best_epoch": int(best_epoch),
-        #     "iterations": int(iterations),
-        #     "optimizer": str(self.optimizer_type),
-        #     "train_outerweights": bool(self.train_outerweights),
-        # }
         
