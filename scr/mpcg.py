@@ -2,9 +2,13 @@ import torch
 from typing import Optional
 
 
-def _to_boundary(x: torch.Tensor, d: torch.Tensor, s: float) -> tuple[torch.Tensor, float]:
+def _to_boundary(
+    x: torch.Tensor, 
+    d: torch.Tensor, 
+    s: float
+    ) -> tuple[torch.Tensor, float]:
     """
-    the trust-region boundary projection: Project x + tau d to the trust-region boundary |x| = s by solving for tau.
+    Project x + tau d to the boundary |x| = s by solving for tau.
     In the algorithm, we should have
     |x| <= s, |x + tau d| <= s
     Returns the updated x and the step length tau used.
@@ -32,9 +36,6 @@ def mpcg(
     DP: Optional[torch.Tensor] = None,
 ):
     """Projected Conjugate Gradient with optional trust-region.
-
-    Mirrors the MATLAB implementation mpcg.m.
-
     Args:
         H: (approximated) Hessian.
         b: ( - gradient f) Right-hand side vector.

@@ -6,10 +6,14 @@ import torch
 
 def _phi(t, th, gamma):
     """
-    Non-convex penalty function phi(t) for gamma > 0.
+    Non-convex penalty function phi(t).
     th = 0: the full nonconvex penalty
     th = 1: the L1 penalty
     """
+    # Degenerate case: gamma = 0 corresponds to L1.
+    # This avoids the 0/0 form in log(1+gam*t)/gam when gam=gamma/(1-th)=0.
+    if gamma == 0:
+        return t
     if th == 1:
         return t
     else:
@@ -21,6 +25,9 @@ def _phi(t, th, gamma):
 
 def _dphi(t, th, gamma):
     """Derivative of penalty function."""
+    # Degenerate case: gamma = 0 corresponds to L1 => d/dt |t| = 1 for t>=0 here.
+    if gamma == 0:
+        return torch.ones_like(t)
     if th == 1:
         return torch.ones_like(t)
     else:
@@ -29,6 +36,9 @@ def _dphi(t, th, gamma):
 
 def _ddphi(t, th, gamma):
     """Second derivative of penalty function."""
+    # Degenerate case: gamma = 0 corresponds to L1 => second derivative is zero a.e.
+    if gamma == 0:
+        return torch.zeros_like(t)
     if th == 1:
         return torch.zeros_like(t)
     else:

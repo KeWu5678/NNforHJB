@@ -29,7 +29,7 @@ class model:
         power: float = 2.1, 
         lr: float = 1.0,
         loss_weights: Tuple[float, float] = (1.0, 1.0), 
-        th: float = 0.5,
+        th: float = 0.01,
         training_percentage: float = 0.9,  
         verbose: bool = True,
         train_outerweights: bool = False

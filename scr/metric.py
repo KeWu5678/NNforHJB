@@ -5,7 +5,7 @@ import os
 import pickle
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.ticker import MaxNLocator
+from matplotlib.ticker import MaxNLocator, ScalarFormatter
 
 
 def _get_field(dataset: Any, name: str) -> np.ndarray:
@@ -766,6 +766,14 @@ def plot_best_loss_vs_best_neurons_by_gamma(
     ax.grid(True, alpha=0.25)
     if logy:
         ax.set_yscale("log")
+    else:
+        # Force plain scientific notation on y-axis (no offset like "1e-8 + 2.83e-1").
+        # This keeps the standard scientific scaling (e.g. "1e-8") without rounding ticks.
+        fmt = ScalarFormatter(useMathText=True)
+        fmt.set_scientific(True)
+        fmt.set_powerlimits((0, 0))  # always use scientific notation
+        fmt.set_useOffset(False)
+        ax.yaxis.set_major_formatter(fmt)
     if legend:
         from matplotlib.lines import Line2D
 
