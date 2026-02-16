@@ -164,3 +164,10 @@ cython_debug/
 # Project-specific data artifacts
 rawdata/outdated/
 outdated
+
+# MLflow
+mlruns/
+
+# Editor/IDE folders
+.claude/
+.cursor/
