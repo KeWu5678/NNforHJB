@@ -59,6 +59,13 @@ class PDPA_v2:
 
         self.activation_fn = activation
 
+        # ReLU is positively homogeneous → parameterize on S^d.
+        # Non-ReLU activations need unconstrained (a, b) ∈ R^{d+1}.
+        self._is_relu: bool = (
+            activation is torch.relu
+            or activation is torch.nn.functional.relu
+        )
+
         # Data split
         self.data_train, self.data_valid = self.model._prepare_data(data)
         if self.model.input_dim is None:
@@ -67,14 +74,18 @@ class PDPA_v2:
 
     def sample_uniform_sphere_points(self, N: int) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Sample N points uniformly on the unit sphere in R^(d+1).
+        Sample N candidate neurons.
+
+        For ReLU (homogeneous): uniformly on S^d in R^{d+1}.
+        For other activations: N(0, 1) in R^{d+1} (unconstrained).
 
         Returns:
             Tuple (a, b) where a has shape (N, d) and b has shape (N,)
         """
         d = int(self.input_dim)
         v = torch.randn(N, d + 1, dtype=torch.float64, device="cpu")
-        v = v / v.norm(dim=1, keepdim=True).clamp_min(1e-12)
+        if self._is_relu:
+            v = v / v.norm(dim=1, keepdim=True).clamp_min(1e-12)
 
         a = v[:, :d].contiguous()
         b = v[:, d].contiguous()
@@ -117,6 +128,7 @@ class PDPA_v2:
         d_dim = X_train.shape[1]
         Kx = K * d_dim  # Match MATLAB: numel(xhat) = d * N_points
         w1, w2 = self.model.loss_weights
+        is_relu = self._is_relu
 
         # Compute residual of current model once for all candidates.
         if net is not None:
@@ -201,13 +213,19 @@ class PDPA_v2:
 
                 def closure() -> torch.Tensor:
                     opt.zero_grad()
-                    w_s = w / w.norm().clamp_min(eps)
+                    if is_relu:
+                        w_s = w / w.norm().clamp_min(eps)
+                    else:
+                        w_s = w
                     obj = profile(w_s[:d], w_s[d])
                     (-obj).backward()
                     return -obj
 
                 opt.step(closure)
-                w_s = (w / w.norm().clamp_min(eps)).detach()
+                if is_relu:
+                    w_s = (w / w.norm().clamp_min(eps)).detach()
+                else:
+                    w_s = w.detach()
                 results_a.append(w_s[:d])
                 results_b.append(w_s[d:d+1])
 
@@ -217,19 +235,32 @@ class PDPA_v2:
             a_cands: torch.Tensor,
             b_cands: torch.Tensor,
         ) -> Tuple[torch.Tensor, torch.Tensor]:
-            """Merge candidates with similar (w,b) direction on S^d."""
+            """Merge nearby candidates.
+
+            ReLU: cosine similarity on S^d (only direction matters).
+            Non-ReLU: Euclidean distance in R^{d+1} (scale matters).
+            """
             n = a_cands.shape[0]
             if n <= 1:
                 return a_cands, b_cands
             U = torch.cat([a_cands, b_cands.reshape(-1, 1)], dim=1)
-            nrm = U.norm(dim=1, keepdim=True).clamp_min(1e-12)
-            U_normed = U / nrm
-            S = U_normed @ U_normed.T
+            if is_relu:
+                nrm = U.norm(dim=1, keepdim=True).clamp_min(1e-12)
+                U_normed = U / nrm
+                sim = U_normed @ U_normed.T
+            else:
+                dists = torch.cdist(U.unsqueeze(0), U.unsqueeze(0)).squeeze(0)
             keep = torch.ones(n, dtype=torch.bool)
             for i in range(n):
                 if keep[i]:
                     for j in range(i + 1, n):
-                        if keep[j] and S[i, j] > 1.0 - merge_tol:
+                        if not keep[j]:
+                            continue
+                        if is_relu:
+                            should_merge = sim[i, j] > 1.0 - merge_tol
+                        else:
+                            should_merge = dists[i, j] < merge_tol
+                        if should_merge:
                             keep[j] = False
             return a_cands[keep], b_cands[keep]
 
@@ -242,8 +273,9 @@ class PDPA_v2:
             b_exist = net.hidden.bias.detach()
             if W_exist.shape[0] > 0:
                 U_exist = torch.cat([W_exist, b_exist.reshape(-1, 1)], dim=1)
-                nrm = U_exist.norm(dim=1, keepdim=True).clamp_min(1e-12)
-                U_exist = U_exist / nrm
+                if is_relu:
+                    nrm = U_exist.norm(dim=1, keepdim=True).clamp_min(1e-12)
+                    U_exist = U_exist / nrm
                 # If too many, subsample (MATLAB: cap at Nguess/2)
                 n_exist = U_exist.shape[0]
                 if n_exist > N // 2:
@@ -357,11 +389,24 @@ class PDPA_v2:
             act = self.activation_fn(pre)                          # (N, n_new)
             S_val_new = act ** p                                   # (N, n_new)
 
-            # Gradient kernel: dS/dx_{k,n,j} = dS/dz_{k,n} * W_{n,j}
-            if p == 1.0:
-                dS_dz = (pre > 0).double()                         # (N, n_new)
+            # dS/dz where S(z) = σ(z)^p, z = x^T a + b.
+            # Chain rule: dS/dz = p * σ(z)^{p-1} * σ'(z).
+            # For ReLU, σ'(z) = 1_{z>0}. For general activations, compute
+            # σ'(z) via autograd (need enable_grad since we are in no_grad).
+            if self._is_relu:
+                act_deriv = (pre > 0).double()                     # (N, n_new)
             else:
-                dS_dz = (p * act ** (p - 1) * (pre > 0).double())  # (N, n_new)
+                pre_tmp = pre.detach().requires_grad_(True)
+                with torch.enable_grad():
+                    act_tmp = self.activation_fn(pre_tmp)
+                    act_deriv = torch.autograd.grad(
+                        act_tmp.sum(), pre_tmp, create_graph=False
+                    )[0].detach()
+
+            if p == 1.0:
+                dS_dz = act_deriv                                  # (N, n_new)
+            else:
+                dS_dz = p * act ** (p - 1) * act_deriv             # (N, n_new)
 
             # S_grad_new: (N*d, n_new)
             dS_dx = dS_dz.unsqueeze(2) * W_new.unsqueeze(0)       # (N, n_new, d)
@@ -524,13 +569,14 @@ class PDPA_v2:
         outer_weights: torch.Tensor,
         merge_tol: float = 1e-3,
         verbose: bool = True,
+        is_relu: bool = True,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Merge duplicate neurons whose (w, b) directions coincide on S^d.
+        """Merge duplicate neurons and remove zeros.
 
-        Matches MATLAB postprocess (setup_problem_NN_2d.m lines 204-216):
-        computes pairwise distance between neuron positions, finds connected
-        components within merge_tol, keeps one representative per cluster
-        and sums their outer weights.
+        For ReLU (is_relu=True): merges by cosine similarity on S^d
+        (only direction matters due to homogeneity).
+        For non-ReLU: merges by Euclidean distance in R^{d+1}
+        (scale matters).
 
         Zero-weight neurons (|u| == 0) produced by the proximal operator
         are also removed (MATLAB PDAPmultisemidiscrete.m lines 176-179).
@@ -539,9 +585,10 @@ class PDPA_v2:
             weights:       Inner weights, shape (n, d).
             biases:        Inner biases, shape (n,).
             outer_weights: Outer weights, shape (1, n) or (n,).
-            merge_tol:     Cosine-similarity tolerance for merging
-                           neurons with the same (w, b) direction.
+            merge_tol:     Cosine-similarity tol (ReLU) or Euclidean
+                           distance tol (non-ReLU) for merging.
             verbose:       Log info.
+            is_relu:       Whether the activation is ReLU.
 
         Returns:
             (W_kept, b_kept, ow_kept) with ow_kept shaped (1, n_kept).
@@ -554,11 +601,14 @@ class PDPA_v2:
         if n <= 1:
             return w, b, ow.reshape(1, -1)
 
-        # Merge neurons whose (w, b) directions coincide on S^d.
+        # Merge nearby neurons: cosine similarity (ReLU) or Euclidean distance (non-ReLU).
         U = torch.cat([w, b.reshape(-1, 1)], dim=1)  # (n, d+1)
-        nrm = U.norm(dim=1, keepdim=True).clamp_min(1e-12)
-        U_normed = U / nrm
-        S = U_normed @ U_normed.T  # cosine similarity matrix
+        if is_relu:
+            nrm = U.norm(dim=1, keepdim=True).clamp_min(1e-12)
+            U_normed = U / nrm
+            sim = U_normed @ U_normed.T  # cosine similarity matrix
+        else:
+            dists = torch.cdist(U.unsqueeze(0), U.unsqueeze(0)).squeeze(0)
 
         # Union-find to cluster similar neurons
         parent = list(range(n))
@@ -571,7 +621,11 @@ class PDPA_v2:
 
         for i in range(n):
             for j in range(i + 1, n):
-                if S[i, j] > 1.0 - merge_tol:
+                if is_relu:
+                    should_merge = sim[i, j] > 1.0 - merge_tol
+                else:
+                    should_merge = dists[i, j] < merge_tol
+                if should_merge:
                     ri, rj = find(i), find(j)
                     if ri != rj:
                         parent[rj] = ri
@@ -662,7 +716,8 @@ class PDPA_v2:
 
             # 2. Merge duplicate neurons + remove zeros (MATLAB postprocess + lines 176-179)
             W_hidden, b_hidden, W_outer = self.prune_small_weights(
-                W_hidden, b_hidden, W_outer, merge_tol=merge_tol, verbose=verbose
+                W_hidden, b_hidden, W_outer, merge_tol=merge_tol, verbose=verbose,
+                is_relu=self._is_relu,
             )
 
             # Rebuild network with pruned weights for loss computation and insertion

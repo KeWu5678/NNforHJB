@@ -171,3 +171,4 @@ mlruns/
 # Editor/IDE folders
 .claude/
 .cursor/
+reference/
