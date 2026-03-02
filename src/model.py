@@ -235,6 +235,33 @@ class model:
  
         return total_loss, value_loss, grad_loss
 
+    @torch.no_grad()
+    def _compute_relative_errors(
+        self, x_input: torch.Tensor, target_v: torch.Tensor, target_dv: torch.Tensor
+    ) -> Tuple[float, float]:
+        """Compute relative L2 and H1 errors (equation 45, Gradient-Augmented Regression).
+
+        Returns:
+            (err_l2, err_h1) as plain floats.
+        """
+        x = x_input.clone().detach().requires_grad_(True)
+        with torch.enable_grad():
+            pred_v = self.net(x)
+            pred_dv = torch.autograd.grad(
+                outputs=pred_v, inputs=x,
+                grad_outputs=torch.ones_like(pred_v),
+                create_graph=False, retain_graph=False,
+            )[0]
+
+        v_diff_sq = torch.sum((pred_v - target_v) ** 2)
+        v_true_sq = torch.sum(target_v ** 2)
+        dv_diff_sq = torch.sum((pred_dv - target_dv) ** 2)
+        dv_true_sq = torch.sum(target_dv ** 2)
+
+        err_l2 = torch.sqrt(v_diff_sq / v_true_sq.clamp_min(1e-30))
+        err_h1 = torch.sqrt((v_diff_sq + dv_diff_sq) / (v_true_sq + dv_true_sq).clamp_min(1e-30))
+        return float(err_l2.item()), float(err_h1.item())
+
     def train(
         self, 
         data_train: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
@@ -244,10 +271,10 @@ class model:
         outer_weights: Optional[torch.Tensor] = None,
         iterations: int = 5000, 
         display_every: int = 1000
-    ) -> None:
+    ) -> bool:
         """
         Train the model on the provided data.
-        
+
         Args:
             data: Dictionary with keys 'x', 'v', 'dv'
             inner_weights: Pre-defined inner weights (optional)
@@ -255,9 +282,10 @@ class model:
             iterations: Number of training iterations (default: 5000)
             batch_size: Batch size (default: 1620)
             display_every: Display frequency (default: 1000)
-            
+
         Returns:
-            Tuple of (model_wrapper, weight, bias, output_weight)
+            True if training made progress (at least one successful SSN step),
+            False if SSN line search failed on every step.
         """
 
         # Initialize
@@ -286,6 +314,7 @@ class model:
         # Training loop
         consecutive_failed_ssn_steps = 0
         max_consecutive_failed_ssn_steps = 3
+        successful_steps = 0
         for epoch in range(iterations):
             self.optimizer.zero_grad()
             if isinstance(self.optimizer, (SSN, SSN_TR)):
@@ -307,6 +336,7 @@ class model:
                 total_loss.backward()
                 self.optimizer.step()
                 loss = total_loss
+                successful_steps += 1
 
             # Save running best model
             # self.net.eval() # set to evaluation mode (not be needed since always full patch)
@@ -336,6 +366,7 @@ class model:
                         )
                 else:
                     consecutive_failed_ssn_steps = 0
+                    successful_steps += 1
 
                 if consecutive_failed_ssn_steps >= max_consecutive_failed_ssn_steps:
                     if self.verbose:
@@ -360,4 +391,4 @@ class model:
         if self.verbose:
             logger.info(f"Best validation loss: {best_val_loss:.6f} at iteration {best_epoch}")
 
-        
+        return successful_steps > 0

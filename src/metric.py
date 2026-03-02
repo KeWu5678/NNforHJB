@@ -294,6 +294,10 @@ def summarize_final_neuron_count_and_loss(
 
     best_neurons: list[float] = []
     best_losses: list[float] = []
+    best_err_l2: list[float] = []
+    best_err_h1: list[float] = []
+
+    suffix = "val" if loss == "valid" else "train"
 
     for i in range(len(gammas)):
         pdpa = pdpa_list[i]
@@ -303,6 +307,8 @@ def summarize_final_neuron_count_and_loss(
         if safe.size == 0 or not np.any(np.isfinite(safe)):
             best_losses.append(np.nan)
             best_neurons.append(np.nan)
+            best_err_l2.append(np.nan)
+            best_err_h1.append(np.nan)
             continue
 
         best_it = int(np.argmin(safe))
@@ -314,26 +320,52 @@ def summarize_final_neuron_count_and_loss(
         except Exception:
             best_neurons.append(np.nan)
 
+        # L2 / H1 relative errors at the best iteration (if available)
+        l2_hist = getattr(pdpa, f"err_l2_{suffix}", None)
+        h1_hist = getattr(pdpa, f"err_h1_{suffix}", None)
+        if l2_hist is not None and best_it < len(l2_hist):
+            best_err_l2.append(float(l2_hist[best_it]))
+        else:
+            best_err_l2.append(np.nan)
+        if h1_hist is not None and best_it < len(h1_hist):
+            best_err_h1.append(float(h1_hist[best_it]))
+        else:
+            best_err_h1.append(np.nan)
+
     best_neurons_arr = np.asarray(best_neurons, dtype=float)
     best_losses_arr = np.asarray(best_losses, dtype=float)
+    best_err_l2_arr = np.asarray(best_err_l2, dtype=float)
+    best_err_h1_arr = np.asarray(best_err_h1, dtype=float)
 
     loss_col = "best_val_loss" if loss == "valid" else "best_train_loss"
     result: dict[str, Any] = {
         "gammas": gammas,
         "best_neurons": best_neurons_arr,
         loss_col: best_losses_arr,
+        "best_err_l2": best_err_l2_arr,
+        "best_err_h1": best_err_h1_arr,
     }
 
     try:
         import pandas as pd  # type: ignore
 
-        df = pd.DataFrame(
-            {"best_neurons": best_neurons_arr, loss_col: best_losses_arr},
-            index=[f"gamma={g:g}" for g in gammas],
-        )
+        data_dict: dict[str, Any] = {
+            "best_neurons": best_neurons_arr,
+            loss_col: best_losses_arr,
+        }
+        # Only include L2/H1 columns when data is available
+        if np.any(np.isfinite(best_err_l2_arr)):
+            data_dict["err_l2"] = best_err_l2_arr
+        if np.any(np.isfinite(best_err_h1_arr)):
+            data_dict["err_h1"] = best_err_h1_arr
+
+        df = pd.DataFrame(data_dict, index=[f"gamma={g:g}" for g in gammas])
         df_fmt = df.copy()
         df_fmt["best_neurons"] = df_fmt["best_neurons"].map(lambda v: f"{v:.0f}" if np.isfinite(v) else "nan")
         df_fmt[loss_col] = df_fmt[loss_col].map(lambda v: f"{v:.2e}" if np.isfinite(v) else "nan")
+        for col in ("err_l2", "err_h1"):
+            if col in df_fmt.columns:
+                df_fmt[col] = df_fmt[col].map(lambda v: f"{v:.2e}" if np.isfinite(v) else "nan")
         result["table_df"] = df_fmt
     except Exception:
         pass
@@ -346,27 +378,40 @@ def plot_loss_vs_neurons_by_gamma(
     *,
     pdpa_key: Optional[str] = None,
     loss: str = "valid",
+    metric: str = "loss",
     ax: Optional[plt.Axes] = None,
     logy: bool = False,
     legend: bool = True,
 ) -> Tuple[plt.Figure, plt.Axes]:
-    """Plot best-so-far loss vs neuron count over iterations for a single pkl file.
+    """Plot best-so-far metric vs neuron count over iterations for a single pkl file.
 
     One line per gamma.  At each PDPA iteration *t* the plotted point is:
       x = neuron count at iteration t
-      y = min(loss_hist[:t+1])
+      y = min(metric_hist[:t+1])
 
     Args:
         pkl_path: path to a '.pkl' experiment file.
         pdpa_key: explicit key for the PDPA list (auto-detected if *None*).
-        loss: ``"valid"`` or ``"train"``.
+        loss: ``"valid"`` or ``"train"`` — which split to use.
+        metric: ``"loss"`` (objective), ``"err_l2"`` (relative L2), or
+                ``"err_h1"`` (relative H1).
         ax: optional axes to draw on.
         logy: use log scale on y-axis.
         legend: show legend.
     """
     if loss not in {"valid", "train"}:
         raise ValueError(f"loss must be 'valid' or 'train', got {loss!r}")
-    loss_attr = "val_loss" if loss == "valid" else "train_loss"
+    if metric not in {"loss", "err_l2", "err_h1"}:
+        raise ValueError(f"metric must be 'loss', 'err_l2', or 'err_h1', got {metric!r}")
+
+    suffix = "val" if loss == "valid" else "train"
+    if metric == "loss":
+        metric_attr = f"{suffix}_loss" if suffix == "train" else "val_loss"
+    else:
+        metric_attr = f"{metric}_{suffix}"
+
+    _YLABEL = {"loss": "Best-so-far loss", "err_l2": "Relative L2 error", "err_h1": "Relative H1 error"}
+    _TITLE = {"loss": "Loss vs neurons", "err_l2": "L2 error vs neurons", "err_h1": "H1 error vs neurons"}
 
     p = Path(pkl_path)
     if not p.is_file():
@@ -396,8 +441,11 @@ def plot_loss_vs_neurons_by_gamma(
 
     for i, g in enumerate(gammas):
         pdpa = pdpa_list[i]
-        loss_hist = np.asarray(getattr(pdpa, loss_attr), dtype=float).reshape(-1)
-        safe = np.where(np.isfinite(loss_hist), loss_hist, np.inf)
+        hist = getattr(pdpa, metric_attr, None)
+        if hist is None:
+            continue
+        metric_hist = np.asarray(hist, dtype=float).reshape(-1)
+        safe = np.where(np.isfinite(metric_hist), metric_hist, np.inf)
         if safe.size == 0 or not np.any(np.isfinite(safe)):
             continue
 
@@ -406,18 +454,18 @@ def plot_loss_vs_neurons_by_gamma(
         T = min(len(best_so_far), len(inner_weights))
 
         neurons = np.array([inner_weights[t]["weight"].shape[0] for t in range(T)], dtype=float)
-        losses = best_so_far[:T]
-        finite = np.isfinite(neurons) & np.isfinite(losses)
+        values = best_so_far[:T]
+        finite = np.isfinite(neurons) & np.isfinite(values)
         if not np.any(finite):
             continue
 
-        xs, ys = neurons[finite], losses[finite]
+        xs, ys = neurons[finite], values[finite]
         ax.plot(xs, ys, marker="o", markersize=4, label=fr"$\gamma$={g:g}")
         ax.annotate(f"{xs[-1]:.0f}", (xs[-1], ys[-1]), textcoords="offset points", xytext=(4, 4), fontsize=8, fontweight="bold")
 
     ax.set_xlabel("Neuron count")
-    ax.set_ylabel("Best-so-far loss")
-    ax.set_title("Loss vs neurons")
+    ax.set_ylabel(_YLABEL[metric])
+    ax.set_title(_TITLE[metric])
     ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     ax.grid(True, alpha=0.25)
     if logy:

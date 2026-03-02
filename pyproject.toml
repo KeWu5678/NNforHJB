@@ -11,6 +11,8 @@ dependencies = [
     "torch>=2.6",
     # Machine learning
     "scikit-learn>=1.6",
+    # Data analysis
+    "pandas>=2.2",
     # Visualization
     "matplotlib>=3.10",
     # Logging

@@ -49,86 +49,159 @@ def _ddphi(t, th, gamma):
         gam = gamma / (1 - th)
         return -(1 - th) * gam / ((1 + gam * t) ** 2)
 
-def _phi_prox(sigma: float, g: float, th: float, gamma: float) -> float:
+def _phi_prox(sigma: float, g: float, th: float, gamma: float, q: float = 1.0) -> float:
     """
-    Proximal operator for sigma * phi, solving:
-        argmin_{t >= 0} { sigma * phi(t) + (1/2) * (t - g)^2 }
+    Proximal operator for sigma * phi(t^q), solving:
+        argmin_{t >= 0} { sigma * phi(t^q) + (1/2) * (t - g)^2 }
 
-    Matches MATLAB setup_problem_NN_2d.m lines 176-177.
+    For q=1, matches MATLAB setup_problem_NN_2d.m lines 176-177 (closed-form).
+    For q!=1, uses Newton's method on the optimality condition:
+        F(tau) = tau - g + sigma * q * tau^{q-1} * dphi(tau^q) = 0
 
     Args:
         sigma: proximal parameter (typically alpha / what)
         g: proximal center point (typically -phat / what)
         th: interpolation parameter between L1 (th=0) and non-convex (th=1)
         gamma: nonconvex penalty parameter
+        q: power exponent, q = 2/(p+1) where p is the activation power
 
     Returns:
         The proximal point (float >= 0).
     """
-    if gamma == 0 or th >= 1.0:
-        return max(g - sigma, 0.0)
+    # q=1 path: original closed-form
+    if q == 1.0:
+        if gamma == 0 or th >= 1.0:
+            return max(g - sigma, 0.0)
+        gam = gamma / (1.0 - th)
+        a = g - sigma * th - 1.0 / gam
+        disc = a * a + 4.0 * (g - sigma) / gam
+        if disc < 0:
+            return 0.0
+        return max(0.5 * (a + math.sqrt(disc)), 0.0)
 
-    gam = gamma / (1.0 - th)
-    a = g - sigma * th - 1.0 / gam
-    disc = a * a + 4.0 * (g - sigma) / gam
-    if disc < 0:
+    # General q != 1: Newton's method
+    if g <= 0:
         return 0.0
-    return max(0.5 * (a + math.sqrt(disc)), 0.0)
+
+    tau = g
+    for _ in range(30):
+        if tau <= 0:
+            return 0.0
+        tq = tau ** q
+        dp = _dphi(torch.tensor(tq), th, gamma).item()
+        ddp = _ddphi(torch.tensor(tq), th, gamma).item()
+        F_val = tau - g + sigma * q * tau ** (q - 1) * dp
+        F_deriv = 1.0 + sigma * (
+            q * (q - 1) * tau ** (q - 2) * dp
+            + q ** 2 * tau ** (2 * q - 2) * ddp
+        )
+        if abs(F_deriv) < 1e-30:
+            break
+        tau_new = tau - F_val / F_deriv
+        tau_new = max(tau_new, 0.0)
+        if abs(tau_new - tau) < 1e-14 * max(abs(tau), 1.0):
+            tau = tau_new
+            break
+        tau = tau_new
+
+    return max(tau, 0.0)
 
 
-def _compute_prox(v, mu):
-    """Compute the soft thresholding operator
+def _compute_prox(v, mu, q=1.0):
+    """Proximal operator for mu * |·|^q (the simple part of the SSN splitting).
+
+    Solves: argmin_t { mu * t^q + (1/2) * (t - |v|)^2 } for t >= 0,
+    then returns sign(v) * t_opt.
+
+    For q=1: soft thresholding, prox(v) = sign(v) * max(|v| - mu, 0).
+    For q<1: Newton's method on the optimality condition t + mu*q*t^{q-1} = |v|.
+
     Args:
-        v: input vector
-        mu: regularization parameter
+        v: input tensor
+        mu: proximal parameter (typically alpha / c in SSN)
+        q: power exponent, q = 2/(p+1) where p is the activation power
     Returns:
         vprox: proximal operator result
     """
-    normsv = torch.abs(v)
+    if q == 1.0:
+        normsv = torch.abs(v)
+        eps = torch.finfo(v.dtype).eps
+        normsv_safe = torch.clamp(normsv, min=(mu + eps) * eps)
+        shrinkage_factor = torch.clamp(1 - mu / normsv_safe, min=0)
+        return shrinkage_factor * v
 
-    # Safeguard against division by zero
-    eps = torch.finfo(v.dtype).eps
-    normsv_safe = torch.clamp(normsv, min=(mu + eps) * eps)
-    
-    # Apply scalar soft shrinkage operator
-    # vprox = max(0, 1 - mu / |v|) * v for each element
-    shrinkage_factor = torch.clamp(1 - mu / normsv_safe, min=0)
-    vprox = shrinkage_factor * v
-    
-    return vprox
+    # General q != 1
+    abs_v = torch.abs(v)
+    # Threshold: minimum of f(t) = t + mu*q*t^{q-1} at t* = [mu*q*(1-q)]^{1/(2-q)}
+    t_star = (mu * q * (1.0 - q)) ** (1.0 / (2.0 - q))
+    v_thresh = t_star + mu * q * t_star ** (q - 1)
+    active = abs_v > v_thresh
 
-def _compute_dprox(v, mu):
-    """Compute the derivative of the proximal operator
-    
+    # Newton's method: solve t + mu*q*t^{q-1} = |v|, starting from t = |v|
+    t = abs_v.clone()
+    for _ in range(20):
+        t_safe = t.clamp(min=1e-30)
+        h = t_safe + mu * q * t_safe ** (q - 1) - abs_v
+        hp = 1.0 + mu * q * (q - 1) * t_safe ** (q - 2)
+        t = torch.where(active, t - h / hp, torch.zeros_like(t))
+        t = t.clamp(min=0.0)
+
+    t = torch.where(active, t, torch.zeros_like(t))
+    return torch.sign(v) * t
+
+def _compute_dprox(v, mu, q=1.0, prox_result=None):
+    """Jacobian of the proximal operator prox_{mu*|·|^q}(v).
+
+    Ported from MATLAB computeDProx.m. With N=1 (scalar outer weights),
+    each neuron's Jacobian block reduces to a scalar diagonal entry.
+
+    For q=1 (soft thresholding prox(v) = sign(v)*max(|v|-mu, 0)):
+        d prox/dv = 1 for active (|v| > mu), 0 for inactive.
+        (Computed via MATLAB's general N-dim formula specialized to N=1.)
+
+    For q<1 (prox from Newton solve of t + mu*q*t^{q-1} = |v|):
+        d prox/dv = 1 / (1 + mu*q*(q-1)*|prox|^{q-2}) for active, 0 for inactive.
+        Requires prox_result to avoid recomputing the Newton loop.
+
+    Used in SSN's _DG to form the generalized Jacobian:
+        DG = c*(I - DPc) + alpha*diag(correction_dd)*DPc + H_data*DPc
+
     Args:
-        v: the vector-valued parameter
-        mu: proximal parameter
-        
-    Returns:
-        DP: derivative matrix of the proximal operator (diagonal)
-    """
-    # Ensure input is real
-    assert torch.is_floating_point(v), "Input must be real-valued"
-    
-    # For scalar sparsity (N=1), each element is its own group
-    # normsv = abs(v) for each element
-    normsv = torch.abs(v)
-    
-    # Safeguard against division by zero
-    eps = torch.finfo(v.dtype).eps
-    normsv_safe = torch.clamp(normsv, min=(mu + eps) * eps)
-    
-    # First term: max(0, 1 - mu / normsv_safe)
-    diagonal_term = torch.clamp(1 - mu / normsv_safe, min=0)
-    
-    # Second term: (normsv >= mu) * mu / (normsv_safe^3) * v^2
-    mask = normsv >= mu
-    outer_product_term = mask.float() * mu / (normsv_safe ** 3) * (v ** 2)
+        v: proximal preimage tensor (the SSN variable q_var)
+        mu: proximal parameter (typically alpha / c)
+        q: power exponent, q = 2/(p+1)
+        prox_result: precomputed prox(v) — required for q != 1
 
-    # Create diagonal matrix
-    DP = torch.diag(diagonal_term + outer_product_term)
-    
-    return DP
+    Returns:
+        DP: Jacobian matrix (diagonal), shape (n, n)
+    """
+    assert torch.is_floating_point(v), "Input must be real-valued"
+
+    if q == 1.0:
+        normsv = torch.abs(v)
+        eps = torch.finfo(v.dtype).eps
+        normsv_safe = torch.clamp(normsv, min=(mu + eps) * eps)
+        # MATLAB computeDProx.m with N=1:
+        #   max(0, 1 - mu/|v|) + (|v|>=mu) * mu/|v|^3 * v^2
+        # For N=1 these sum to 1 (active) or 0 (inactive).
+        diagonal_term = torch.clamp(1 - mu / normsv_safe, min=0)
+        mask = normsv >= mu
+        outer_product_term = mask.float() * mu / (normsv_safe ** 3) * (v ** 2)
+        return torch.diag(diagonal_term + outer_product_term)
+
+    # General q != 1: implicit differentiation of t + mu*q*t^{q-1} = |v|
+    abs_v = torch.abs(v)
+    t_star = (mu * q * (1.0 - q)) ** (1.0 / (2.0 - q))
+    v_thresh = t_star + mu * q * t_star ** (q - 1)
+    active = abs_v > v_thresh
+
+    prox_abs = torch.abs(prox_result)
+    prox_safe = prox_abs.clamp(min=1e-30)
+
+    denom = 1.0 + mu * q * (q - 1) * prox_safe ** (q - 2)
+    diag = torch.where(active, 1.0 / denom, torch.zeros_like(v))
+
+    return torch.diag(diag.reshape(-1))
 
 def stereo(z: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """
