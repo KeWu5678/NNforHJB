@@ -25,7 +25,7 @@ class PDPA_v2:
         gamma: float,
         power: float,
         activation: torch.nn.Module = torch.relu,
-        loss_weights: Tuple[float, float] = (1.0, 1.0),
+        loss_weights: Tuple[float, float] | str = "h1",
         lr: float = 1.0,
         optimizer: str = 'SSN',
         use_sphere: bool = True,
@@ -43,6 +43,14 @@ class PDPA_v2:
         self.outer_weights: List[torch.Tensor] = []
 
         self.alpha = alpha
+
+        # Resolve string shorthand for loss_weights
+        if isinstance(loss_weights, str):
+            _loss_weight_map = {"l2": (1.0, 0.0), "h1": (1.0, 1.0)}
+            key = loss_weights.lower()
+            if key not in _loss_weight_map:
+                raise ValueError(f"loss_weights must be 'l2', 'h1', or a tuple, got '{loss_weights}'")
+            loss_weights = _loss_weight_map[key]
 
         # Match MATLAB: use all data for training, leave 1 point for validation
         N_total = data["x"].shape[0]
@@ -464,7 +472,8 @@ class PDPA_v2:
             if phat <= -alpha and what > 1e-30:
                 sigma = alpha / what
                 g = -phat / what
-                tau = _phi_prox(sigma, g, th, gamma)
+                qq = 2.0 / (p + 1.0)
+                tau = _phi_prox(sigma, g, th, gamma, q=qq)
             else:
                 tau = 0.0
 
@@ -685,7 +694,7 @@ class PDPA_v2:
         merge_tol: float = 1e-3,
         decorrelation: bool = False,
         verbose: bool = True,
-    ) -> tuple[int, int]:
+    ) -> dict:
         """
         PDPA training loop matching MATLAB PDAPmultisemidiscrete.m:
           1. Insert neurons
@@ -693,6 +702,9 @@ class PDPA_v2:
           3. SSN on all outer weights
           4. Merge duplicates + remove zeros
           5. Repeat
+
+        Returns a flat result dict containing hyperparameters, training
+        config, per-iteration histories, and summary statistics.
         """
         best_iteration_train = 0
         best_val_loss = float('inf')
@@ -808,4 +820,33 @@ class PDPA_v2:
 
         best_neurons = int(self.inner_weights[best_iteration_train]["weight"].shape[0])
         final_neurons = int(W_hidden.shape[0])
-        return best_iteration_train, best_neurons, final_neurons
+
+        return {
+            # hyperparameters
+            "alpha": self.alpha,
+            "gamma": self.model.gamma,
+            "power": self.model.power,
+            "loss_weights": tuple(self.model.loss_weights),
+            "activation": self.activation_fn,
+            "use_sphere": self._use_sphere,
+            "optimizer": self.model.optimizer_type,
+            # training config
+            "num_iterations": num_iterations,
+            "num_insertion": num_insertion,
+            "threshold": threshold,
+            # per-iteration histories
+            "train_loss": list(self.train_loss),
+            "val_loss": list(self.val_loss),
+            "err_l2_train": list(self.err_l2_train),
+            "err_l2_val": list(self.err_l2_val),
+            "err_h1_train": list(self.err_h1_train),
+            "err_h1_val": list(self.err_h1_val),
+            "inner_weights": list(self.inner_weights),
+            "outer_weights": list(self.outer_weights),
+            # summary
+            "best_iteration": best_iteration_train,
+            "best_neurons": best_neurons,
+            "final_neurons": final_neurons,
+            "best_err_l2_train": self.err_l2_train[best_iteration_train],
+            "best_err_h1_train": self.err_h1_train[best_iteration_train],
+        }

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pickle
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 import mlflow
 import numpy as np
@@ -29,55 +29,6 @@ def setup_mlflow(
     return experiment.experiment_id
 
 
-def _pick_pdpa_key(d: Mapping[str, Any]) -> str:
-    """Auto-detect the PDPA list key in a pickle dict."""
-    for cand in ("pdpa_list_h1", "pdpa_list_l2", "pdpa_list"):
-        if cand in d:
-            return cand
-    raise KeyError(
-        "Could not infer PDPA list key. Expected one of "
-        "('pdpa_list_h1', 'pdpa_list_l2', 'pdpa_list') in the pickle dict. "
-        f"Available keys: {list(d.keys())}"
-    )
-
-
-def _pick_best_iteration_key(d: Mapping[str, Any]) -> Optional[str]:
-    """Auto-detect the best_iteration key in a pickle dict."""
-    for cand in ("best_iteration_h1", "best_iteration_l2", "best_iteration"):
-        if cand in d:
-            return cand
-    return None
-
-
-def _get_pdpa_for_index(
-    gammas_arr: np.ndarray,
-    pdpa_list_or_map: Any,
-    i: int,
-) -> Any:
-    """Retrieve the PDPA object for gamma index *i*."""
-    if isinstance(pdpa_list_or_map, Mapping):
-        g = gammas_arr[i].item() if hasattr(gammas_arr[i], "item") else gammas_arr[i]
-        if g in pdpa_list_or_map:
-            return pdpa_list_or_map[g]
-        if str(g) in pdpa_list_or_map:
-            return pdpa_list_or_map[str(g)]
-        raise KeyError(f"pdpa map has no entry for gamma={g!r}")
-    if isinstance(pdpa_list_or_map, (list, tuple)):
-        return pdpa_list_or_map[i]
-    raise TypeError(
-        f"PDPA container must be a list, tuple, or mapping; got {type(pdpa_list_or_map)}"
-    )
-
-
-def _loss_norm_tag(pdpa_key: str) -> str:
-    """Derive a short tag like 'h1' or 'l2' from the pdpa key."""
-    if "h1" in pdpa_key:
-        return "h1"
-    if "l2" in pdpa_key:
-        return "l2"
-    return "unknown"
-
-
 # ---------------------------------------------------------------------------
 # Retroactive import from pickle
 # ---------------------------------------------------------------------------
@@ -90,13 +41,13 @@ def log_experiment_from_pickle(
 ) -> str:
     """Import a completed experiment pickle into MLflow.
 
-    Creates one **parent run** (per pickle file / seed) with **nested child
+    Creates one **parent run** (per pickle file) with **nested child
     runs** for each gamma value.
 
     Args:
-        pkl_path: Path to the ``.pkl`` file.
+        pkl_path: Path to a ``.pkl`` file containing a list of result dicts.
         experiment_name: MLflow experiment name.  Defaults to the parent
-            directory name (e.g. ``experiment_9_v1``).
+            directory name (e.g. ``experiment_9``).
         tracking_uri: MLflow tracking URI.
 
     Returns:
@@ -104,43 +55,31 @@ def log_experiment_from_pickle(
     """
     pkl_path = Path(pkl_path)
     with open(pkl_path, "rb") as f:
-        data: Dict[str, Any] = pickle.load(f)
+        result_list: List[Dict[str, Any]] = pickle.load(f)
 
     if experiment_name is None:
         experiment_name = pkl_path.parent.name
 
     setup_mlflow(experiment_name, tracking_uri)
 
-    # Extract seed from filename (last part before .pkl, e.g. "…_h1_-2.pkl" → "-2")
+    # Extract seed from filename (last part before .pkl, e.g. "…_h1_-2.pkl" -> "-2")
     seed = pkl_path.stem.split("_")[-1]
 
-    pdpa_key = _pick_pdpa_key(data)
-    norm_tag = _loss_norm_tag(pdpa_key)
-    gammas = np.asarray(data["gammas"]).reshape(-1)
-    pdpa_list = data[pdpa_key]
-
-    best_iter_key = _pick_best_iteration_key(data)
-    best_iterations: Optional[List[int]] = (
-        data[best_iter_key] if best_iter_key is not None else None
-    )
+    # Shared hyperparameters from the first result
+    r0 = result_list[0]
 
     with mlflow.start_run(run_name=f"seed_{seed}") as parent_run:
         # -- shared hyperparameters ------------------------------------------
-        mlflow.log_param("alpha", data.get("alpha"))
-        mlflow.log_param("power", data.get("power"))
-        mlflow.log_param("num_iteration", data.get("num_iteration"))
-        mlflow.log_param("num_insertion", data.get("num_insertion"))
-        mlflow.log_param("pruning_threshold", data.get("pruning_threshold"))
-        mlflow.log_param("loss_weights", str(data.get("loss_weights")))
-        mlflow.log_param("optimizer", str(data.get("optimizer")))
-        mlflow.log_param("lr", str(data.get("lr")))
+        for k in ("alpha", "power", "activation", "loss_weights", "optimizer",
+                   "use_sphere", "num_iterations", "num_insertion", "threshold"):
+            if k in r0:
+                mlflow.log_param(k, str(r0[k]))
         mlflow.log_param("seed", seed)
-        mlflow.log_param("norm", norm_tag)
         mlflow.set_tag("source_file", str(pkl_path))
 
         # -- per-gamma child runs --------------------------------------------
-        for i, gamma in enumerate(gammas):
-            pdpa = _get_pdpa_for_index(gammas, pdpa_list, i)
+        for r in result_list:
+            gamma = r["gamma"]
 
             with mlflow.start_run(
                 run_name=f"gamma_{gamma:g}",
@@ -148,8 +87,12 @@ def log_experiment_from_pickle(
             ):
                 mlflow.log_param("gamma", float(gamma))
 
-                train_loss = list(pdpa.train_loss)
-                val_loss = list(pdpa.val_loss)
+                train_loss = list(r["train_loss"])
+                val_loss = list(r["val_loss"])
+                err_l2_train = list(r.get("err_l2_train", []))
+                err_l2_val = list(r.get("err_l2_val", []))
+                err_h1_train = list(r.get("err_h1_train", []))
+                err_h1_val = list(r.get("err_h1_val", []))
 
                 # Step-based metrics
                 for step in range(len(train_loss)):
@@ -157,20 +100,24 @@ def log_experiment_from_pickle(
                         "train_loss": train_loss[step],
                         "val_loss": val_loss[step],
                     }
-                    if hasattr(pdpa, "inner_weights") and step < len(
-                        pdpa.inner_weights
-                    ):
+                    if step < len(err_l2_train):
+                        metrics["err_l2_train"] = err_l2_train[step]
+                    if step < len(err_l2_val):
+                        metrics["err_l2_val"] = err_l2_val[step]
+                    if step < len(err_h1_train):
+                        metrics["err_h1_train"] = err_h1_train[step]
+                    if step < len(err_h1_val):
+                        metrics["err_h1_val"] = err_h1_val[step]
+                    if step < len(r.get("inner_weights", [])):
                         n_neurons = int(
-                            pdpa.inner_weights[step]["weight"].shape[0]
+                            r["inner_weights"][step]["weight"].shape[0]
                         )
                         metrics["num_neurons"] = n_neurons
                     mlflow.log_metrics(metrics, step=step)
 
                 # Summary metrics
-                if best_iterations is not None and i < len(best_iterations):
-                    best_iter = int(best_iterations[i])
-                else:
-                    # Fallback: argmin of train_loss
+                best_iter = r.get("best_iteration")
+                if best_iter is None:
                     safe = np.where(
                         np.isfinite(train_loss), train_loss, np.inf
                     )
@@ -183,16 +130,16 @@ def log_experiment_from_pickle(
                     )
                 if best_iter < len(val_loss):
                     mlflow.log_metric("best_val_loss", val_loss[best_iter])
-                if (
-                    hasattr(pdpa, "inner_weights")
-                    and best_iter < len(pdpa.inner_weights)
-                ):
+                if best_iter < len(r.get("inner_weights", [])):
                     mlflow.log_metric(
                         "best_num_neurons",
                         int(
-                            pdpa.inner_weights[best_iter]["weight"].shape[0]
+                            r["inner_weights"][best_iter]["weight"].shape[0]
                         ),
                     )
+                for key in ("best_err_l2_train", "best_err_h1_train"):
+                    if key in r:
+                        mlflow.log_metric(key, float(r[key]))
 
     return parent_run.info.run_id
 
@@ -202,41 +149,73 @@ def log_experiment_from_pickle(
 # ---------------------------------------------------------------------------
 
 
+def _activation_name(activation) -> str:
+    """Extract a clean name from an activation function."""
+    if callable(activation):
+        return getattr(activation, "__name__", str(activation))
+    return str(activation)
+
+
+def _loss_type(loss_weights) -> str:
+    """Map loss_weights tuple to a short label."""
+    if isinstance(loss_weights, str):
+        return loss_weights.lower()
+    w = tuple(loss_weights)
+    if w == (1.0, 0.0):
+        return "l2"
+    if w == (1.0, 1.0):
+        return "h1"
+    return f"w{w[0]:g}_{w[1]:g}"
+
+
 def log_training_run(
-    experiment_name: str,
-    params: Dict[str, Any],
-    gamma: float,
-    pdpa_object: Any,
-    best_iteration: int,
+    result: Dict[str, Any],
+    seed: int,
     artifacts: Optional[Dict[str, str]] = None,
     tracking_uri: str = "file:./mlruns",
 ) -> str:
-    """Log a live training run to MLflow.
+    """Log a training run to MLflow from a result dict.
 
     Call this *after* training completes for a single gamma value.
 
+    Hierarchy:
+        Experiment = ``"{activation}_p{power}_{loss_type}_seed{seed}"``
+        Run        = ``"gamma_{gamma}"``
+
     Args:
-        experiment_name: MLflow experiment name.
-        params: Shared hyperparameters dict (alpha, power, …).
-        gamma: The gamma value for this run.
-        pdpa_object: A trained ``PDPA_v1`` (or ``PDPA``) instance.
-        best_iteration: Index of the best iteration.
+        result: A result dict returned by ``PDPA_v2.retrain()``.
+        seed: Random seed used for the experiment.
         artifacts: Optional ``{name: file_path}`` dict of artifacts to log.
         tracking_uri: MLflow tracking URI.
 
     Returns:
         The MLflow run ID.
     """
+    activation = _activation_name(result.get("activation", "unknown"))
+    power = result.get("power", 1)
+    loss = _loss_type(result.get("loss_weights", (1.0, 1.0)))
+    gamma = result["gamma"]
+
+    experiment_name = f"{activation}_p{power:g}_{loss}_seed{seed}"
+    run_name = f"gamma_{gamma:g}"
     setup_mlflow(experiment_name, tracking_uri)
 
-    with mlflow.start_run(run_name=f"gamma_{gamma:g}") as run:
+    with mlflow.start_run(run_name=run_name) as run:
         # Log hyperparameters
-        for k, v in params.items():
-            mlflow.log_param(k, v)
-        mlflow.log_param("gamma", float(gamma))
+        for k in ("alpha", "gamma", "power", "optimizer", "use_sphere",
+                   "num_iterations", "num_insertion", "threshold"):
+            if k in result:
+                mlflow.log_param(k, str(result[k]))
+        mlflow.log_param("activation", activation)
+        mlflow.log_param("loss_type", loss)
+        mlflow.log_param("seed", seed)
 
-        train_loss = list(pdpa_object.train_loss)
-        val_loss = list(pdpa_object.val_loss)
+        train_loss = list(result["train_loss"])
+        val_loss = list(result["val_loss"])
+        err_l2_train = list(result.get("err_l2_train", []))
+        err_l2_val = list(result.get("err_l2_val", []))
+        err_h1_train = list(result.get("err_h1_train", []))
+        err_h1_val = list(result.get("err_h1_val", []))
 
         # Step-based metrics
         for step in range(len(train_loss)):
@@ -244,30 +223,36 @@ def log_training_run(
                 "train_loss": train_loss[step],
                 "val_loss": val_loss[step],
             }
-            if hasattr(pdpa_object, "inner_weights") and step < len(
-                pdpa_object.inner_weights
-            ):
+            if step < len(err_l2_train):
+                metrics["err_l2_train"] = err_l2_train[step]
+            if step < len(err_l2_val):
+                metrics["err_l2_val"] = err_l2_val[step]
+            if step < len(err_h1_train):
+                metrics["err_h1_train"] = err_h1_train[step]
+            if step < len(err_h1_val):
+                metrics["err_h1_val"] = err_h1_val[step]
+            if step < len(result.get("inner_weights", [])):
                 n_neurons = int(
-                    pdpa_object.inner_weights[step]["weight"].shape[0]
+                    result["inner_weights"][step]["weight"].shape[0]
                 )
                 metrics["num_neurons"] = n_neurons
             mlflow.log_metrics(metrics, step=step)
 
         # Summary metrics
-        best_iter = int(best_iteration)
+        best_iter = result.get("best_iteration", 0)
         mlflow.log_metric("best_iteration", best_iter)
         if best_iter < len(train_loss):
             mlflow.log_metric("best_train_loss", train_loss[best_iter])
         if best_iter < len(val_loss):
             mlflow.log_metric("best_val_loss", val_loss[best_iter])
-        if (
-            hasattr(pdpa_object, "inner_weights")
-            and best_iter < len(pdpa_object.inner_weights)
-        ):
+        if best_iter < len(result.get("inner_weights", [])):
             mlflow.log_metric(
                 "best_num_neurons",
-                int(pdpa_object.inner_weights[best_iter]["weight"].shape[0]),
+                int(result["inner_weights"][best_iter]["weight"].shape[0]),
             )
+        for key in ("best_err_l2_train", "best_err_h1_train"):
+            if key in result:
+                mlflow.log_metric(key, float(result[key]))
 
         # Artifacts
         if artifacts:

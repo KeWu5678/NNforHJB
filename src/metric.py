@@ -1,11 +1,24 @@
 from __future__ import annotations
-from typing import Any, Mapping, Optional, Tuple
+from typing import Any, Mapping, Optional, Sequence, Tuple
 from pathlib import Path
 import os
 import pickle
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator, ScalarFormatter
+
+
+def _load_results(results: Sequence[dict] | str | os.PathLike[str]) -> list[dict]:
+    """Accept a list of result dicts or a pkl_path, return a list of dicts."""
+    if isinstance(results, (str, os.PathLike)):
+        p = Path(results)
+        if not p.is_file():
+            raise FileNotFoundError(f"File not found: {p}")
+        with open(p, "rb") as f:
+            results = pickle.load(f)
+    if not isinstance(results, (list, tuple)) or not results:
+        raise TypeError("results must be a non-empty list of result dicts")
+    return list(results)
 
 
 def _get_field(dataset: Any, name: str) -> np.ndarray:
@@ -226,71 +239,44 @@ def plot_vdp_value_with_gradient_arrows2d(
     return fig, ax
 
 
-def print_experiment_hyperparameters(pkl_path: str | os.PathLike[str]) -> None:
-    """Print hyperparameters from a single experiment pickle file.
+def print_experiment_hyperparameters(results: Sequence[dict] | str | os.PathLike[str]) -> None:
+    """Print hyperparameters from experiment results.
 
     Args:
-        pkl_path: path to a '.pkl' file saved by the training notebooks.
+        results: list of result dicts, or path to a pickle containing one.
     """
-    HPARAM_KEYS = ("gammas", "alpha", "power", "num_iteration", "num_insertion", "pruning_threshold")
+    result_list = _load_results(results)
 
-    p = Path(pkl_path)
-    if not p.is_file():
-        raise FileNotFoundError(f"File not found: {p}")
+    HPARAM_KEYS = ("alpha", "power", "activation", "loss_weights", "use_sphere",
+                   "optimizer", "num_iterations", "num_insertion", "threshold")
 
-    with open(p, "rb") as f:
-        d = pickle.load(f)
+    # All results share the same hyperparameters (except gamma), so use the first
+    r0 = result_list[0]
+    gammas = [r["gamma"] for r in result_list]
 
-    print(f"=== {p} ===")
+    print(f"gammas: {gammas}")
     for k in HPARAM_KEYS:
-        if k not in d:
-            continue
-        v = np.asarray(d[k]).reshape(-1).tolist() if k == "gammas" else d[k]
-        print(f"  {k}: {v!r}")
+        if k in r0:
+            print(f"  {k}: {r0[k]!r}")
 
 
 def summarize_final_neuron_count_and_loss(
-    pkl_path: str | os.PathLike[str],
+    results: Sequence[dict] | str | os.PathLike[str],
     *,
-    pdpa_key: Optional[str] = None,
     loss: str = "valid",
 ) -> dict[str, Any]:
-    """Summarize neuron count and best loss per gamma from a single pickle file.
-
-    Returns a dict with per-gamma rows: neuron count at the best iteration and
-    the best (val or train) loss.  Includes a ``table_df`` key with a formatted
-    pandas DataFrame when pandas is available.
+    """Summarize neuron count and best loss per gamma from experiment results.
 
     Args:
-        pkl_path: path to a '.pkl' experiment file.
-        pdpa_key: explicit key for the PDPA list in the pickle dict.
-                  Auto-detected if *None*.
+        results: list of result dicts, or path to a pickle containing one.
         loss: ``"valid"`` or ``"train"`` — which loss history to use.
     """
     if loss not in {"valid", "train"}:
         raise ValueError(f"loss must be 'valid' or 'train', got {loss!r}")
-    loss_attr = "val_loss" if loss == "valid" else "train_loss"
+    loss_key = "val_loss" if loss == "valid" else "train_loss"
 
-    p = Path(pkl_path)
-    if not p.is_file():
-        raise FileNotFoundError(f"File not found: {p}")
-
-    with open(p, "rb") as f:
-        d = pickle.load(f)
-
-    # --- resolve pdpa list key ---
-    if pdpa_key is not None:
-        k_pdpa = pdpa_key
-    else:
-        for cand in ("pdpa_list_h1", "pdpa_list_l2", "pdpa_list"):
-            if cand in d:
-                k_pdpa = cand
-                break
-        else:
-            raise KeyError("Could not find PDPA list key in pickle.")
-
-    gammas = np.asarray(d["gammas"]).reshape(-1).astype(float)
-    pdpa_list = d[k_pdpa]
+    result_list = _load_results(results)
+    gammas = np.array([r["gamma"] for r in result_list], dtype=float)
 
     best_neurons: list[float] = []
     best_losses: list[float] = []
@@ -299,9 +285,8 @@ def summarize_final_neuron_count_and_loss(
 
     suffix = "val" if loss == "valid" else "train"
 
-    for i in range(len(gammas)):
-        pdpa = pdpa_list[i]
-        loss_hist = np.asarray(getattr(pdpa, loss_attr), dtype=float).reshape(-1)
+    for r in result_list:
+        loss_hist = np.asarray(r[loss_key], dtype=float).reshape(-1)
         safe = np.where(np.isfinite(loss_hist), loss_hist, np.inf)
 
         if safe.size == 0 or not np.any(np.isfinite(safe)):
@@ -315,14 +300,13 @@ def summarize_final_neuron_count_and_loss(
         best_losses.append(float(safe[best_it]))
 
         try:
-            w = pdpa.inner_weights[best_it]["weight"]
+            w = r["inner_weights"][best_it]["weight"]
             best_neurons.append(float(w.shape[0]))
         except Exception:
             best_neurons.append(np.nan)
 
-        # L2 / H1 relative errors at the best iteration (if available)
-        l2_hist = getattr(pdpa, f"err_l2_{suffix}", None)
-        h1_hist = getattr(pdpa, f"err_h1_{suffix}", None)
+        l2_hist = r.get(f"err_l2_{suffix}")
+        h1_hist = r.get(f"err_h1_{suffix}")
         if l2_hist is not None and best_it < len(l2_hist):
             best_err_l2.append(float(l2_hist[best_it]))
         else:
@@ -353,7 +337,6 @@ def summarize_final_neuron_count_and_loss(
             "best_neurons": best_neurons_arr,
             loss_col: best_losses_arr,
         }
-        # Only include L2/H1 columns when data is available
         if np.any(np.isfinite(best_err_l2_arr)):
             data_dict["err_l2"] = best_err_l2_arr
         if np.any(np.isfinite(best_err_h1_arr)):
@@ -374,24 +357,22 @@ def summarize_final_neuron_count_and_loss(
 
 
 def plot_loss_vs_neurons_by_gamma(
-    pkl_path: str | os.PathLike[str],
+    results: Sequence[dict] | str | os.PathLike[str],
     *,
-    pdpa_key: Optional[str] = None,
     loss: str = "valid",
     metric: str = "loss",
     ax: Optional[plt.Axes] = None,
     logy: bool = False,
     legend: bool = True,
 ) -> Tuple[plt.Figure, plt.Axes]:
-    """Plot best-so-far metric vs neuron count over iterations for a single pkl file.
+    """Plot best-so-far metric vs neuron count over iterations.
 
     One line per gamma.  At each PDPA iteration *t* the plotted point is:
       x = neuron count at iteration t
       y = min(metric_hist[:t+1])
 
     Args:
-        pkl_path: path to a '.pkl' experiment file.
-        pdpa_key: explicit key for the PDPA list (auto-detected if *None*).
+        results: list of result dicts, or path to a pickle containing one.
         loss: ``"valid"`` or ``"train"`` — which split to use.
         metric: ``"loss"`` (objective), ``"err_l2"`` (relative L2), or
                 ``"err_h1"`` (relative H1).
@@ -406,42 +387,23 @@ def plot_loss_vs_neurons_by_gamma(
 
     suffix = "val" if loss == "valid" else "train"
     if metric == "loss":
-        metric_attr = f"{suffix}_loss" if suffix == "train" else "val_loss"
+        metric_key = f"{suffix}_loss" if suffix == "train" else "val_loss"
     else:
-        metric_attr = f"{metric}_{suffix}"
+        metric_key = f"{metric}_{suffix}"
 
     _YLABEL = {"loss": "Best-so-far loss", "err_l2": "Relative L2 error", "err_h1": "Relative H1 error"}
     _TITLE = {"loss": "Loss vs neurons", "err_l2": "L2 error vs neurons", "err_h1": "H1 error vs neurons"}
 
-    p = Path(pkl_path)
-    if not p.is_file():
-        raise FileNotFoundError(f"File not found: {p}")
-
-    with open(p, "rb") as f:
-        d = pickle.load(f)
-
-    # --- resolve pdpa list key ---
-    if pdpa_key is not None:
-        k_pdpa = pdpa_key
-    else:
-        for cand in ("pdpa_list_h1", "pdpa_list_l2", "pdpa_list"):
-            if cand in d:
-                k_pdpa = cand
-                break
-        else:
-            raise KeyError("Could not find PDPA list key in pickle.")
-
-    gammas = np.asarray(d["gammas"]).reshape(-1).astype(float)
-    pdpa_list = d[k_pdpa]
+    result_list = _load_results(results)
 
     if ax is None:
         fig, ax = plt.subplots(figsize=(10, 6))
     else:
         fig = ax.figure
 
-    for i, g in enumerate(gammas):
-        pdpa = pdpa_list[i]
-        hist = getattr(pdpa, metric_attr, None)
+    for r in result_list:
+        g = r["gamma"]
+        hist = r.get(metric_key)
         if hist is None:
             continue
         metric_hist = np.asarray(hist, dtype=float).reshape(-1)
@@ -450,7 +412,7 @@ def plot_loss_vs_neurons_by_gamma(
             continue
 
         best_so_far = np.minimum.accumulate(safe)
-        inner_weights = pdpa.inner_weights
+        inner_weights = r["inner_weights"]
         T = min(len(best_so_far), len(inner_weights))
 
         neurons = np.array([inner_weights[t]["weight"].shape[0] for t in range(T)], dtype=float)
@@ -480,4 +442,3 @@ def plot_loss_vs_neurons_by_gamma(
         ax.legend(frameon=False)
     fig.tight_layout()
     return fig, ax
-

@@ -1,4 +1,3 @@
-from tabnanny import verbose
 from typing import Callable, Iterable, Optional
 
 import torch
@@ -6,7 +5,8 @@ from torch import Tensor
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.optim import Optimizer
 from loguru import logger
-from .utils import _dphi, _ddphi, _compute_prox, _compute_dprox
+from .utils import (_compute_prox, _compute_dprox,
+                     _penalty_grad, _nonconvex_correction, _nonconvex_correction_dd)
 
 __all__ = ["SSN"]
 
@@ -36,6 +36,7 @@ class SSN(Optimizer):
         lr: float = 1.0,
         max_ls_iter: int = 500,
         tolerance_ls: float = 1.0 + 1e-8,
+        power: float = 1.0,
     ) -> None:
         defaults = {
             "lr": lr,
@@ -49,120 +50,100 @@ class SSN(Optimizer):
         if len(self.param_groups) > 1:
             raise ValueError("SSN doesn't support per-parameter options")
 
-        
-        self.data_hessian: Optional[Tensor] = None  # Hessian of data loss w.r.t. outer weights
-        # Expose whether the last SSN step was accepted.
-        # This is useful for training-loop early stopping / fallbacks.
+        self.q: float = 2.0 / (power + 1.0)  # power-transformed exponent
+        self.data_hessian: Optional[Tensor] = None
         self.last_step_success: bool = True
 
     def _initialize_q(
-        self, 
-        alpha: float, 
-        gamma: float, 
-        c: float, 
-        th: float, 
-        params: Tensor, 
+        self,
+        alpha: float,
+        gamma: float,
+        c: float,
+        th: float,
+        params: Tensor,
         loss: Tensor
     ) -> Tensor:
         """
-        Following MATLAB SSN.m (lines 47-53). It assume the NOC it fufilled and back calculate the proxy.
+        Following MATLAB SSN.m (lines 47-53). Assumes the NOC is fulfilled
+        and back-calculates the proximal preimage q_var.
         """
+        qq = self.q
         grad_loss = torch.autograd.grad(
             loss, self.param_groups[0]["params"], create_graph=False, retain_graph=True
         )
         grad_flat = torch.cat([g.view(-1) for g in grad_loss])
 
-        # loss includes regularization (alpha*phi(|u|)), but SSN handles it
-        # separately via Dphima.  Subtract the reg gradient to get data-only.
-        # Matches MATLAB SSN.m line 48: gf0 = alpha*Dphima(u0) + Sred'*F.dF(...)
-        reg_grad = alpha * _dphi(torch.abs(params), th, gamma) * torch.sign(params)
+        abs_u = torch.abs(params)
+        sign_u = torch.sign(params)
+
+        # Subtract reg gradient from autograd (which includes it) to get data-only
+        reg_grad = _penalty_grad(abs_u, sign_u, alpha, th, gamma, q=qq)
         grad_data = grad_flat - reg_grad
 
-        # gradient of F w.r.t the outerweight u (cf.p27 Kontantin)
-        gf_u = (
-            grad_data +
-            alpha * torch.sign(params) * (_dphi(torch.abs(params), th, gamma) - 1.0)
-        )
+        # gf_u = grad_data + alpha * D_nonconvex
+        gf_u = grad_data + alpha * _nonconvex_correction(abs_u, sign_u, th, gamma, q=qq)
 
-        # Override on nonzero entries: gf0_i = -alpha * sign(u_i)
-        nonzero_mask = torch.abs(params) > 0
-        gf_u = torch.where(nonzero_mask, -alpha * torch.sign(params), gf_u)
+        # Override on nonzero entries (NOC condition)
+        # For q=1: -alpha * sign(u). For general q: -alpha * q * |u|^{q-1} * sign(u).
+        active = abs_u > 0
+        if qq == 1.0:
+            gf_u = torch.where(active, -alpha * sign_u, gf_u)
+        else:
+            s = abs_u.clamp(min=1e-30)
+            gf_u = torch.where(active, -alpha * qq * s ** (qq - 1) * sign_u, gf_u)
 
-        q = params - (1.0 / c) * gf_u
-        return q
+        q_var = params - (1.0 / c) * gf_u
+        return q_var
 
     def _initilize_G(
-        self, 
-        alpha: float, 
-        gamma: float, 
-        c: float, 
-        th: float, 
-        q: Tensor, 
-        params: Tensor, 
+        self,
+        alpha: float,
+        gamma: float,
+        c: float,
+        th: float,
+        q_var: Tensor,
+        params: Tensor,
         loss: Tensor
     ) -> Tensor:
         """
         Compute the gradient G(q) of the reformulated objective.
-        
-        This computes the gradient of the semismooth Newton system with respect
-        to the proximal preimage q.
-        
-        Args:
-            alpha: Regularization parameter for the penalty function.
-            gamma: Parameter for the non-convex penalty function.
-            c: Scaling constant (typically 1 + alpha*gamma).
-            th: Interpolation parameter between L1 (th=0) and non-convex (th=1).
-            q: Proximal preimage tensor.
-            params: Current outer weights as a flattened tensor.
-            loss: Current loss tensor (used for gradient computation).
-            
-        Returns:
-            The gradient G(q) of the semismooth Newton system.
         """
-        # D_nonconvex compute d/du (phi(|u|) - |u|)
-        D_nonconvex = torch.sign(params) * (_dphi(torch.abs(params), th, gamma) - 1)
+        qq = self.q
+        abs_u = torch.abs(params)
+        sign_u = torch.sign(params)
+
+        D_nc = _nonconvex_correction(abs_u, sign_u, th, gamma, q=qq)
+
         grad_loss = torch.autograd.grad(loss, self.param_groups[0]["params"], retain_graph=True)
         grad_flat = torch.cat([g.view(-1) for g in grad_loss])
 
-        # Subtract regularization gradient to get data-only gradient.
-        # Matches MATLAB SSN.m line 45: G uses Sred'*F.dF(Sred*u - ref)
-        reg_grad = alpha * _dphi(torch.abs(params), th, gamma) * torch.sign(params)
+        reg_grad = _penalty_grad(abs_u, sign_u, alpha, th, gamma, q=qq)
         grad_data = grad_flat - reg_grad
 
-        return c * (q - params) + alpha * D_nonconvex + grad_data
+        return c * (q_var - params) + alpha * D_nc + grad_data
 
     def _DG(
-        self, 
-        alpha: float, 
-        gamma: float, 
-        c: float, 
-        th: float, 
-        q: Tensor, 
+        self,
+        alpha: float,
+        gamma: float,
+        c: float,
+        th: float,
+        q_var: Tensor,
         params: Tensor
     ) -> Tensor:
         """
         Compute the generalized Jacobian DG of the semismooth Newton system.
-        
-        This computes the (generalized) derivative of G(q) which forms the 
-        linear system for the Newton step: DG * dq = -G(q).
-        
-        Args:
-            alpha: Regularization parameter for the penalty function.
-            gamma: Parameter for the non-convex penalty function.
-            c: Scaling constant (typically 1 + alpha*gamma).
-            th: Interpolation parameter between L1 (th=0) and non-convex (th=1).
-            q: Proximal preimage tensor.
-            params: Current outer weights as a flattened tensor.
-            
-        Returns:
-            Tensor: The generalized Jacobian matrix DG (n x n).
+        DG * dq = -G(q).
         """
-        DPc: Tensor = _compute_dprox(q, alpha / c)
+        qq = self.q
+        DPc: Tensor = _compute_dprox(q_var, alpha / c, q=qq, prox_result=params)
         I: Tensor = torch.eye(params.shape[0], device=params.device, dtype=params.dtype)
+
+        corr_dd = _nonconvex_correction_dd(torch.abs(params), th, gamma, q=qq)
 
         return (
             c * (I - DPc)
-            + alpha * torch.diag(_ddphi(torch.abs(params), th, gamma)) @ DPc
+            + alpha * torch.diag(corr_dd) @ DPc
             + self.data_hessian @ DPc  # type: ignore[union-attr]
         )
 
@@ -217,7 +198,7 @@ class SSN(Optimizer):
             return loss
         
         qnew: Tensor = q + dq
-        unew: Tensor = _compute_prox(qnew, alpha / c)
+        unew: Tensor = _compute_prox(qnew, alpha / c, q=self.q)
         
         # Evaluate loss at full Newton step
         vector_to_parameters(unew, self.param_groups[0]["params"])
@@ -245,7 +226,7 @@ class SSN(Optimizer):
             try:
                 theta_safe = max(theta, min_theta)
                 qnew = q - lr * torch.linalg.solve(DG + (1/theta_safe) * I, Gq)
-                unew = _compute_prox(qnew, alpha / c)
+                unew = _compute_prox(qnew, alpha / c, q=self.q)
                 vector_to_parameters(unew, self.param_groups[0]["params"])
                 loss_new = closure()
                 theta = max(theta / 4.0, min_theta)
@@ -258,10 +239,8 @@ class SSN(Optimizer):
             iter_ls += 1
         
         if iter_ls >= max_ls_iter or torch.isnan(loss_new):
-            if verbose:
-                logger.warning(f"Line search failed after {iter_ls} iterations")
-                logger.warning(f"Final lossective values: loss={loss.item():.6e}, loss_new={loss_new.item() if not torch.isnan(loss_new) else 'NaN'}")
-                logger.warning(f"Final theta: {theta:.2e}")
+            logger.debug(f"Line search failed after {iter_ls} iterations")
+            logger.debug(f"loss={loss.item():.6e}, loss_new={loss_new.item() if not torch.isnan(loss_new) else 'NaN'}, theta={theta:.2e}")
             vector_to_parameters(params, self.param_groups[0]["params"])
             self.last_step_success = False
             return loss

@@ -181,7 +181,7 @@ class model:
             if self.train_outerweights == True:
                 output_params = [self.net.output.weight]
                 optimizer_class = SSN if self.optimizer_type == "SSN" else SSN_TR
-                self.optimizer = optimizer_class(output_params, alpha=self.alpha, gamma=self.gamma, th=self.th, lr=self.lr)
+                self.optimizer = optimizer_class(output_params, alpha=self.alpha, gamma=self.gamma, th=self.th, lr=self.lr, power=self.power)
                 if self.verbose:
                     logger.info(f"Using {self.optimizer_type} optimizer with alpha={self.alpha}, gamma={self.gamma}, th={self.th}, lr ={self.lr}")
             else:
@@ -231,7 +231,10 @@ class model:
 
         # Full objective: data loss + regularization
         # Matches MATLAB SSN.m line 34: obj = @(u) F.F(Sred*u - ref) + alpha*sum(phi.phi(computeNorm(u, NQ)))
-        total_loss = data_loss + self.alpha * torch.sum(_phi(torch.abs(self.net.output.weight), self.th, self.gamma))
+        abs_u = torch.abs(self.net.output.weight)
+        q = 2.0 / (self.power + 1.0)
+        reg_arg = abs_u ** q if q != 1.0 else abs_u
+        total_loss = data_loss + self.alpha * torch.sum(_phi(reg_arg, self.th, self.gamma))
  
         return total_loss, value_loss, grad_loss
 

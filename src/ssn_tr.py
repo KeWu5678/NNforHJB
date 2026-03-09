@@ -31,9 +31,10 @@ class SSN_TR(SSN):
         gamma: float,
         th: float = 0.5,
         lr: float = 1.0,
-        sigmamax: float = 10.0
+        sigmamax: float = 10.0,
+        power: float = 1.0,
     ) -> None:
-        super().__init__(params=params, alpha=alpha, gamma=gamma, th=th, lr=lr)
+        super().__init__(params=params, alpha=alpha, gamma=gamma, th=th, lr=lr, power=power)
         # Trust-region parameters
         self.sigmamax: float = sigmamax
         self.sigma: float = 0.01 * self.sigmamax
@@ -57,7 +58,7 @@ class SSN_TR(SSN):
         # Prepare quantities (reuse SSN helpers)
         q: Tensor = self._initialize_q(alpha, gamma, c, th, params, loss)
         Gq: Tensor = self._initilize_G(alpha, gamma, c, th, q, params, loss)
-        DP: Tensor = _compute_dprox(q, alpha / c)
+        DP: Tensor = _compute_dprox(q, alpha / c, q=self.q, prox_result=params)
         DG: Tensor = self._DG(alpha, gamma, c, th, q, params)
 
         # Krylov/TR step: 
@@ -71,7 +72,7 @@ class SSN_TR(SSN):
 
         # Tentative update and trust-region ratio
         qnew: Tensor = q + lr * dq
-        unew: Tensor = _compute_prox(qnew, alpha / c)
+        unew: Tensor = _compute_prox(qnew, alpha / c, q=self.q)
         vector_to_parameters(unew, self.param_groups[0]["params"])
         loss_new: Tensor = closure()
 

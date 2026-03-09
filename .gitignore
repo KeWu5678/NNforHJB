@@ -172,3 +172,7 @@ mlruns/
 .claude/
 .cursor/
 reference/
+
+# Claude Code files
+CLAUDE.md
+plan.md
