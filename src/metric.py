@@ -356,6 +356,277 @@ def summarize_final_neuron_count_and_loss(
     return result
 
 
+def _extract_active_weights(run: dict, u_thresh: float = 1e-4) -> dict:
+    """Return active (a, b, u) at the best iteration of one run.
+
+    Active means |u| > u_thresh.  Returns a dict with keys:
+        'a'     : np.ndarray (n_active, d)
+        'b'     : np.ndarray (n_active,)
+        'u'     : np.ndarray (n_active,)
+        'gamma' : float
+    """
+    it = run["best_iteration"]
+    iw = run["inner_weights"][it]
+    a = np.asarray(iw["weight"])               # (n, d)
+    b = np.asarray(iw["bias"])                 # (n,)
+    u = np.asarray(run["outer_weights"][it]).flatten()  # (n,)
+    mask = np.abs(u) > u_thresh
+    return {"a": a[mask], "b": b[mask], "u": u[mask], "gamma": run["gamma"]}
+
+
+def plot_inner_weight_3d_scatter(
+    results: "Sequence[dict] | str | os.PathLike[str]",
+    *,
+    u_thresh: float = 1e-4,
+    elev: float = 25.0,
+    azim: float = 45.0,
+    save_path: Optional[str] = None,
+    show: bool = True,
+) -> Tuple[plt.Figure, list]:
+    """3D scatter of inner weights (a1, a2, b) — one subplot per gamma.
+
+    Each active neuron is a point at (a1, a2, b) in R^3.  Marker size is
+    proportional to |u| and color encodes the signed outer weight u.
+
+    Args:
+        results: list of result dicts, or path to a pickle file.
+        u_thresh: neurons with |u| <= u_thresh are excluded.
+        elev, azim: 3D viewing angles.
+        save_path: optional path to save the figure.
+        show: call plt.show().
+
+    Returns:
+        (fig, axes_list) where axes_list contains the 3D Axes objects.
+    """
+    from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
+
+    result_list = _load_results(results)
+    n = len(result_list)
+    fig = plt.figure(figsize=(4 * n, 4.5))
+    axes: list = []
+
+    for col, run in enumerate(result_list):
+        rec = _extract_active_weights(run, u_thresh)
+        a, b, u, gamma = rec["a"], rec["b"], rec["u"], rec["gamma"]
+
+        ax = fig.add_subplot(1, n, col + 1, projection="3d")
+        axes.append(ax)
+
+        if len(u) == 0:
+            ax.set_title(f"gamma={gamma:g}\n(no active neurons)")
+            continue
+
+        sizes = (np.abs(u) / np.abs(u).max()) * 120 + 10
+        sc = ax.scatter(
+            a[:, 0], a[:, 1], b,
+            s=sizes, c=u, cmap="RdBu_r",
+            vmin=-np.abs(u).max(), vmax=np.abs(u).max(),
+            alpha=0.85, edgecolors="k", linewidths=0.3,
+        )
+        fig.colorbar(sc, ax=ax, pad=0.1, shrink=0.55, label="$u$")
+        ax.set_xlabel("$a_1$", labelpad=1)
+        ax.set_ylabel("$a_2$", labelpad=1)
+        ax.set_zlabel("$b$",   labelpad=1)
+        ax.set_title(f"$\\gamma={gamma:g}$\n({len(u)} active)", fontsize=9)
+        ax.view_init(elev=elev, azim=azim)
+
+    fig.suptitle(
+        "Inner weights $(a_1, a_2, b)$ — 3D scatter\n"
+        "(size $\\propto |u|$, color $= u$)",
+        fontsize=10,
+    )
+    fig.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    if show:
+        plt.show()
+    return fig, axes
+
+
+def plot_inner_weight_pairwise_distance(
+    results: "Sequence[dict] | str | os.PathLike[str]",
+    *,
+    u_thresh: float = 1e-4,
+    save_path: Optional[str] = None,
+    show: bool = True,
+) -> Tuple[plt.Figure, list]:
+    """Pairwise Euclidean distance heatmap of inner weights — one subplot per gamma.
+
+    For each gamma the active neurons are sorted by descending |u|.  The
+    (i, j) cell shows ||w_i - w_j||_2  where w_n = (a_n1, a_n2, b_n).
+
+    Near-duplicate neurons appear as dark off-diagonal squares.  The
+    diagonal annotation marks each neuron's |u| value (colorbar on side).
+
+    Args:
+        results: list of result dicts, or path to a pickle file.
+        u_thresh: neurons with |u| <= u_thresh are excluded.
+        save_path: optional path to save the figure.
+        show: call plt.show().
+
+    Returns:
+        (fig, axes_list)
+    """
+    result_list = _load_results(results)
+    n = len(result_list)
+    fig, axes_list = plt.subplots(1, n, figsize=(4 * n, 4))
+
+    if n == 1:
+        axes_list = [axes_list]
+
+    for ax, run in zip(axes_list, result_list):
+        rec = _extract_active_weights(run, u_thresh)
+        a, b, u, gamma = rec["a"], rec["b"], rec["u"], rec["gamma"]
+
+        if len(u) == 0:
+            ax.set_title(f"gamma={gamma:g}\n(no active neurons)")
+            continue
+
+        # sort by descending |u| so the most important neurons come first
+        order = np.argsort(-np.abs(u))
+        a_s, b_s, u_s = a[order], b[order], u[order]
+
+        w = np.column_stack([a_s, b_s])                          # (n, 3)
+        D = np.linalg.norm(w[:, None, :] - w[None, :, :], axis=-1)  # (n, n)
+
+        im = ax.imshow(D, cmap="viridis_r", aspect="auto",
+                       vmin=0, vmax=D.max())
+        fig.colorbar(im, ax=ax, shrink=0.85, label="$\\|w_i - w_j\\|_2$")
+
+        n_act = len(u)
+        ax.set_xticks(range(n_act))
+        ax.set_yticks(range(n_act))
+        if n_act <= 20:
+            ax.set_xticklabels([f"{v:.2f}" for v in u_s], rotation=90, fontsize=6)
+            ax.set_yticklabels([f"{v:.2f}" for v in u_s], fontsize=6)
+        else:
+            ax.tick_params(labelsize=6)
+        ax.set_xlabel("neuron index (sorted by $|u|$ desc)")
+        ax.set_ylabel("neuron index")
+        ax.set_title(f"$\\gamma={gamma:g}$  ({n_act} active)", fontsize=9)
+
+    fig.suptitle(
+        "Pairwise Euclidean distance $\\|w_i - w_j\\|_2$  in $(a_1, a_2, b)$ space\n"
+        "(neurons sorted by $|u|$ descending — dark = close)",
+        fontsize=10,
+    )
+    fig.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    if show:
+        plt.show()
+    return fig, axes_list
+
+
+def plot_model_value_surface(
+    pkl_path: str | os.PathLike[str],
+    *,
+    gamma_index: int = 0,
+    grid_n: int = 100,
+    x_range: Optional[Tuple[float, float]] = None,
+    y_range: Optional[Tuple[float, float]] = None,
+    dataset: Any = None,
+    title: Optional[str] = None,
+    cmap: str = "viridis",
+    elev: float = 30.0,
+    azim: float = 45.0,
+    save_path: Optional[str] = None,
+    show: bool = True,
+) -> Tuple[plt.Figure, Any]:
+    """Plot the learned value function V(x) as a 3D surface from a saved model pickle.
+
+    Args:
+        pkl_path: path to the pickle file containing experiment results.
+        gamma_index: which gamma run to use (index into the results list).
+        grid_n: number of grid points per axis.
+        x_range: (min, max) for x[0]. If None, inferred from dataset or defaults to [-3, 3].
+        y_range: (min, max) for x[1]. If None, inferred from dataset or defaults to [-3, 3].
+        dataset: optional dataset dict with 'x' key, used to infer plot range.
+        title: plot title. If None, auto-generated from gamma and neuron count.
+        cmap: matplotlib colormap name.
+        elev, azim: 3D view angles.
+        save_path: optional path to save the figure.
+        show: call plt.show().
+
+    Returns:
+        (fig, ax) where ax is a 3D axis.
+    """
+    import torch
+    from src.net import ShallowNetwork
+
+    result_list = _load_results(pkl_path)
+    if gamma_index >= len(result_list):
+        raise IndexError(f"gamma_index={gamma_index} but only {len(result_list)} runs in file")
+    run = result_list[gamma_index]
+
+    # Extract best-iteration weights
+    best_it = run["best_iteration"]
+    iw = run["inner_weights"][best_it]
+    a = np.asarray(iw["weight"])       # (n_neurons, d)
+    b = np.asarray(iw["bias"])         # (n_neurons,)
+    u = np.asarray(run["outer_weights"][best_it])  # (1, n_neurons)
+
+    n_neurons, d = a.shape
+    if d != 2:
+        raise ValueError(f"Expected 2D input, got d={d}. This function only supports 2D plots.")
+
+    activation = run.get("activation", torch.relu)
+    power = run.get("power", 1.0)
+
+    # Build network and load weights
+    net = ShallowNetwork(
+        layer_sizes=[d, n_neurons, 1],
+        activation=activation,
+        p=power,
+        inner_weights=a,
+        inner_bias=b,
+        outer_weights=u,
+    )
+    net.eval()
+
+    # Determine grid range
+    if x_range is None or y_range is None:
+        if dataset is not None:
+            x_data = np.asarray(_get_field(dataset, "x"))
+            if x_range is None:
+                x_range = (float(x_data[:, 0].min()), float(x_data[:, 0].max()))
+            if y_range is None:
+                y_range = (float(x_data[:, 1].min()), float(x_data[:, 1].max()))
+        else:
+            x_range = x_range or (-3.0, 3.0)
+            y_range = y_range or (-3.0, 3.0)
+
+    # Evaluate on grid
+    x0 = np.linspace(x_range[0], x_range[1], grid_n)
+    x1 = np.linspace(y_range[0], y_range[1], grid_n)
+    X0, X1 = np.meshgrid(x0, x1)
+    grid_points = np.column_stack([X0.ravel(), X1.ravel()])  # (grid_n^2, 2)
+
+    with torch.no_grad():
+        V = net(torch.tensor(grid_points, dtype=torch.float64)).numpy().reshape(grid_n, grid_n)
+
+    # Plot
+    gamma = run.get("gamma", None)
+    if title is None:
+        title = f"Learned V(x) — gamma={gamma:g}, {n_neurons} neurons" if gamma is not None else f"Learned V(x) — {n_neurons} neurons"
+
+    fig = plt.figure(figsize=(10, 8))
+    ax = fig.add_subplot(111, projection="3d")
+    ax.plot_surface(X0, X1, V, cmap=cmap, alpha=0.9, edgecolor="none")
+    ax.set_xlabel("x[0]")
+    ax.set_ylabel("x[1]")
+    ax.set_zlabel("V(x)")
+    ax.set_title(title)
+    ax.view_init(elev=elev, azim=azim)
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, dpi=300, bbox_inches="tight")
+    if show:
+        plt.show()
+    return fig, ax
+
+
 def plot_loss_vs_neurons_by_gamma(
     results: Sequence[dict] | str | os.PathLike[str],
     *,
