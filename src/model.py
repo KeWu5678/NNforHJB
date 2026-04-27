@@ -241,11 +241,11 @@ class model:
     @torch.no_grad()
     def _compute_relative_errors(
         self, x_input: torch.Tensor, target_v: torch.Tensor, target_dv: torch.Tensor
-    ) -> Tuple[float, float]:
-        """Compute relative L2 and H1 errors (equation 45, Gradient-Augmented Regression).
+    ) -> Tuple[float, float, float]:
+        """Compute relative L2, gradient, and H1 errors.
 
         Returns:
-            (err_l2, err_h1) as plain floats.
+            (err_l2, err_grad, err_h1) as plain floats.
         """
         x = x_input.clone().detach().requires_grad_(True)
         with torch.enable_grad():
@@ -262,8 +262,9 @@ class model:
         dv_true_sq = torch.sum(target_dv ** 2)
 
         err_l2 = torch.sqrt(v_diff_sq / v_true_sq.clamp_min(1e-30))
+        err_grad = torch.sqrt(dv_diff_sq / dv_true_sq.clamp_min(1e-30))
         err_h1 = torch.sqrt((v_diff_sq + dv_diff_sq) / (v_true_sq + dv_true_sq).clamp_min(1e-30))
-        return float(err_l2.item()), float(err_h1.item())
+        return float(err_l2.item()), float(err_grad.item()), float(err_h1.item())
 
     def train(
         self, 

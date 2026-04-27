@@ -37,6 +37,8 @@ class PDPA_v2:
         self.val_loss: List[float] = []
         self.err_l2_train: List[float] = []
         self.err_l2_val: List[float] = []
+        self.err_grad_train: List[float] = []
+        self.err_grad_val: List[float] = []
         self.err_h1_train: List[float] = []
         self.err_h1_val: List[float] = []
         self.inner_weights: List[Dict[str, torch.Tensor]] = []
@@ -762,11 +764,13 @@ class PDPA_v2:
             self.train_loss.append(train_loss_f)
             self.val_loss.append(val_loss_f)
 
-            # Relative L2 and H1 errors (equation 45)
-            l2_tr, h1_tr = self.model._compute_relative_errors(*self.data_train)
-            l2_va, h1_va = self.model._compute_relative_errors(*self.data_valid)
+            # Relative L2, gradient, and H1 errors
+            l2_tr, grad_tr, h1_tr = self.model._compute_relative_errors(*self.data_train)
+            l2_va, grad_va, h1_va = self.model._compute_relative_errors(*self.data_valid)
             self.err_l2_train.append(l2_tr)
             self.err_l2_val.append(l2_va)
+            self.err_grad_train.append(grad_tr)
+            self.err_grad_val.append(grad_va)
             self.err_h1_train.append(h1_tr)
             self.err_h1_val.append(h1_va)
 
@@ -839,6 +843,8 @@ class PDPA_v2:
             "val_loss": list(self.val_loss),
             "err_l2_train": list(self.err_l2_train),
             "err_l2_val": list(self.err_l2_val),
+            "err_grad_train": list(self.err_grad_train),
+            "err_grad_val": list(self.err_grad_val),
             "err_h1_train": list(self.err_h1_train),
             "err_h1_val": list(self.err_h1_val),
             "inner_weights": list(self.inner_weights),

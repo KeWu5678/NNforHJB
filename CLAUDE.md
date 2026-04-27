@@ -3,33 +3,9 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
-
 Sparse neural network training framework for solving Hamilton-Jacobi-Bellman (HJB) equations using primal-dual proximal algorithms (PDPA) with non-convex regularization and semismooth Newton (SSN) optimization. The Python implementation ports and extends a MATLAB reference at `/Users/ruizhechao/Documents/NonConvexSparseNN/`.
 
-## Commands
-
-```bash
-# Install dependencies (pyproject.toml, no requirements.txt)
-pip install -e .
-
-# Run experiments via notebooks
-jupyter notebook notebook/pdpa_vdp.ipynb
-
-# Run a quick test from CLI
-python -c "from src.PDPA_v2 import PDPA_v2; print('import ok')"
-```
-
-No dedicated test suite exists; testing is done through Jupyter notebooks in `notebook/`.
-
-## Environment Notes
-
-- **Project venv** (`.venv/`) uses Python 3.13.
-- **Notebook kernel** may use a different Python (e.g., 3.9 via pyenv). When installing packages, ensure you target the correct interpreter — check which kernel the notebook is using.
-- Dependencies are managed in `pyproject.toml` (there is no `requirements.txt`).
-
-## Architecture
-
-### Algorithm Flow (PDPA)
+### Algorithm Flow (PDPA_v2)
 
 ```
 PDPA_v1/v2.retrain() loop (15-20 iterations):
@@ -156,7 +132,6 @@ For inactive weights (`u_i = 0`), `_initialize_q` sets `q_i = -(1/c) * grad_flat
 
 ## Directory Notes
 
-- `src/` — Active code (use this, not `scr/` or `outdated/`)
-- `scr/` — Stale copy, do not modify
+- `src/` — Active code1
 - `outdated/` — Deprecated experiments
 - `logs/` — Session documentation (see `2025-02-15.md` for debugging history)
