@@ -84,6 +84,47 @@ This differs from the notebook's Gaussian example, where the ratio was also
 high but the near error stayed poor. In the expanded search, squared ReLU
 variants reduce both near and far errors compared with Matérn and Gaussian.
 
+## What Is Specific To The Discontinuity
+
+The previous sections rank by absolute `near_grad`, but that alone does not
+prove a discontinuity-specific mechanism. A lower near error can simply come
+from a uniformly better approximation everywhere. To separate the two effects,
+read `near_grad` together with `far_grad` and `near/far`.
+
+| activation | near grad | far grad | near/far | interpretation |
+|:-----------|----------:|---------:|---------:|:---------------|
+| Leaky ReLU2 sphere, `alpha=0.02` | 0.151223 | 0.017083 | 8.8520 | best absolute near error; much of the gain is also global because far error is extremely small |
+| ReLU2 sphere | 0.157911 | 0.017340 | 9.1068 | same pattern: excellent far fit plus strong near fit |
+| x\|x\| sphere | 0.164566 | 0.021366 | 7.7024 | close to ReLU2, but worse in both near and far regions |
+| SmoothReLU, `w=0.05` | 0.168244 | 0.055722 | 3.0193 | more discontinuity-specific: near error stays competitive even though far fit is much worse |
+| abs activation | 0.177244 | 0.054753 | 3.2371 | kinked value basis helps the jump region, but global fit is weaker |
+| ReLU | 0.182863 | 0.057389 | 3.1864 | hard kink gives relatively good near behavior for its far error |
+| Gaussian | 0.248449 | 0.031426 | 7.9060 | good smooth-region fit does not transfer to the discontinuity |
+
+The discontinuity-specific factor is therefore **one-sided/kinked gradient
+structure**, not just lower H1 error. The target has a gradient jump across
+
+```text
+h(x1, x2) = x1 + x2 * abs(x2) / 2 = 0.
+```
+
+Activations with a one-sided derivative or a kinked transition can create a
+directional contrast across inserted hyperplanes, so their near-region error is
+not as bad as their far-region error would suggest. This is why `SmoothReLU`,
+`abs`, and `ReLU` have much lower near/far ratios than Gaussian or Matérn.
+
+The leading spherical ReLU2/leaky-ReLU2 family combines two effects:
+
+1. It has enough one-sided polynomial structure to keep the near-gradient error
+   low.
+2. It fits smooth regions extremely well, which drives `far_grad` down and
+   improves the absolute H1/near-gradient numbers.
+
+So the headline should be read carefully: **Leaky ReLU2 sphere is best in
+absolute near-discontinuity error, but the clearest discontinuity-specific
+signature appears in kinked/one-sided activations whose near error remains
+competitive despite a weaker far-region fit.**
+
 ## Sparsity Tradeoff
 
 The best-accuracy family uses about 120 neurons. If sparsity matters, the
