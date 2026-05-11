@@ -158,6 +158,12 @@ def relu2(x: torch.Tensor) -> torch.Tensor:
     return torch.relu(x).pow(2)
 
 
+def leaky_relu2(alpha: float):
+    def fn(x: torch.Tensor) -> torch.Tensor:
+        return torch.where(x >= 0, x, alpha * x).pow(2)
+    return fn
+
+
 ACTIVATIONS: dict[str, tuple] = {
     "relu":           (torch.relu,            True),
     "tanh":           (torch.tanh,            False),
@@ -198,6 +204,8 @@ ACTIVATIONS: dict[str, tuple] = {
     "gelu_b0_15":     (gelu_beta(0.15),       False),
     "gelu_b0_2":      (gelu_beta(0.2),        False),
     "gelu_b0_3":      (gelu_beta(0.3),        False),
+    "gelu_b0_35":     (gelu_beta(0.35),       False),
+    "gelu_b0_4":      (gelu_beta(0.4),        False),
     "swish_b0_3":     (swish_beta(0.3),       False),
     "swish_b0_2":     (swish_beta(0.2),       False),
     "swish_b0_15":    (swish_beta(0.15),      False),
@@ -286,7 +294,17 @@ ACTIVATIONS: dict[str, tuple] = {
     "snake_b0_5":    (lambda x: x + torch.sin(0.5*x).pow(2)/0.5,   False),
     "elu2":          (lambda x: F.elu(x).pow(2),                   False),
     "selu_b0_25":    (lambda x: F.selu(0.25*x),                    False),
-    "leaky_relu2_sphere": (lambda x: torch.where(x>=0, x, 0.01*x).pow(2),  True),
+    "leaky_relu2_a0_001_sphere": (leaky_relu2(0.001), True),
+    "leaky_relu2_sphere": (leaky_relu2(0.01),  True),
+    "leaky_relu2_a0_015_sphere": (leaky_relu2(0.015), True),
+    "leaky_relu2_a0_02_sphere": (leaky_relu2(0.02), True),
+    "leaky_relu2_a0_025_sphere": (leaky_relu2(0.025), True),
+    "leaky_relu2_a0_0375_sphere": (leaky_relu2(0.0375), True),
+    "leaky_relu2_a0_05_sphere": (leaky_relu2(0.05), True),
+    "leaky_relu2_a0_05": (leaky_relu2(0.05), False),
+    "leaky_relu2_a0_0625_sphere": (leaky_relu2(0.0625), True),
+    "leaky_relu2_a0_075_sphere": (leaky_relu2(0.075), True),
+    "leaky_relu2_a0_1_sphere": (leaky_relu2(0.1), True),
     "gelu_squared":   (lambda x: F.gelu(x).pow(2), False),
     "silu_squared":   (lambda x: F.silu(x).pow(2), False),
     "softplus_squared_b1": (lambda x: F.softplus(x).pow(2), False),

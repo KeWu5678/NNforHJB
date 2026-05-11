@@ -179,3 +179,5 @@ plan.md
 # activation_search outputs (scoreboard + per-run JSON)
 activation_search/results.tsv
 activation_search/runs/
+activation_search/*/results.tsv
+activation_search/*/runs/

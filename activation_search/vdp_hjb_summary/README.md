@@ -11,8 +11,11 @@ activation_search/
   results.tsv    — append-only scoreboard, tab-separated, NOT git-tracked
   runs/          — per-(activation, seed) JSON outputs from the script
   README.md      — this file
+  vdp_hjb_summary/          — archived summary of the previous VDP HJB results
+  discontinuous_gradient/   — new autoresearch task for the analytic discontinuous-gradient dataset
 scripts/
   run_activation_experiment.py  — one (activation, seed) experiment
+  run_discontinuous_activation_experiment.py  — one discontinuous-gradient experiment
 ```
 
 ## How to launch
