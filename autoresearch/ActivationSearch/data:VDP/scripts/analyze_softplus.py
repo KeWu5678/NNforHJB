@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[1]
 RUNS = ROOT / "runs"
 ANALYSIS = ROOT / "analysis"
 ANALYSIS.mkdir(exist_ok=True)

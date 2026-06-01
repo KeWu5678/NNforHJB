@@ -14,7 +14,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[1]
 FULL_TSV = ROOT / "results.tsv"
 FAMILY_TSV = ROOT / "analysis" / "family_representatives.tsv"
 FLOOR = 0.30

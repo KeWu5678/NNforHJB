@@ -1,4 +1,4 @@
-# activation_search/discontinuous_gradient
+# autoresearch/ActivationSearch/data:analytical
 
 Autonomous search for activation functions on the analytic value function with
 a discontinuous gradient from `notebook/pdpa_vdp.ipynb` Experiment 3.
@@ -42,9 +42,9 @@ secondary metric.
 ```text
 LOOP FOREVER:
   0. Ensure the run directory exists:
-       mkdir -p activation_search/discontinuous_gradient/runs
+       mkdir -p autoresearch/ActivationSearch/data:analytical/runs
 
-  1. Read activation_search/discontinuous_gradient/results.tsv. Pick an
+  1. Read autoresearch/ActivationSearch/data:analytical/results.tsv. Pick an
      activation that has not been run yet, or a promising activation that has
      only partial seed coverage.
 
@@ -62,7 +62,7 @@ LOOP FOREVER:
   2. For each seed in {42, 43, 44, 45, 46}:
        uv run python scripts/run_discontinuous_activation_experiment.py \
          --activation <name> --seed <seed> \
-         > activation_search/discontinuous_gradient/runs/<name>_seed<seed>.json 2>&1
+         > autoresearch/ActivationSearch/data:analytical/runs/<name>_seed<seed>.json 2>&1
 
      Each call prints one JSON line with per-gamma results, best gamma,
      eval metrics, near/far gradient errors, and elapsed time.
@@ -70,12 +70,12 @@ LOOP FOREVER:
      arguments.
 
   3. Aggregate:
-       uv run python activation_search/discontinuous_gradient/aggregate.py \
+       uv run python autoresearch/ActivationSearch/data:analytical/scripts/aggregate.py \
          --activation <name> \
          --description "<short note>"
 
   4. Append one row to:
-       activation_search/discontinuous_gradient/results.tsv
+       autoresearch/ActivationSearch/data:analytical/results.tsv
 
      Columns:
        commit, activation, power, loss, seeds, mean_score, std_score,
@@ -99,11 +99,11 @@ LOOP FOREVER:
 After several rows exist:
 
 ```bash
-uv run python activation_search/discontinuous_gradient/plot_pareto.py
-uv run python activation_search/discontinuous_gradient/rank_discontinuity.py
-uv run python activation_search/discontinuous_gradient/plot_near.py
+uv run python autoresearch/ActivationSearch/data:analytical/scripts/plot_pareto.py
+uv run python autoresearch/ActivationSearch/data:analytical/scripts/rank_discontinuity.py
+uv run python autoresearch/ActivationSearch/data:analytical/scripts/plot_near.py
 ```
 
-This writes `activation_search/discontinuous_gradient/pareto.png`,
+This writes `autoresearch/ActivationSearch/data:analytical/pareto.png`,
 `results_near.tsv`, and `near_pareto.png`. For this dataset, read
 `near_pareto.png` first.

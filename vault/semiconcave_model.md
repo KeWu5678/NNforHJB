@@ -67,7 +67,7 @@ pendulum swing-up value (Lipschitz `V`, discontinuous `dV`):
 | transient (T=3) | pure NN (v2) | 0.325 | 0.307 | 0.185 | 1.67 |
 | transient | semiconcave (v1) | 0.318 | 0.310 | 0.177 | 1.77 |
 
-(means over seeds 42-44, best gamma; `autoresearch/SemiconcaveFittingComparison/PendulumSwingUp/extended_semiconcave_runs/`.)
+(means over seeds 42-44, best gamma; `autoresearch/SemiconcaveFittingComparison/data: pendulum/extended_semiconcave_runs/`.)
 
 **Enforcing semiconcavity does not help at the discontinuity** — its near-switch
 gradient error is actually higher (2.98 vs 2.22 on PMP) and it is worse

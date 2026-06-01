@@ -10,7 +10,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[1]
 RUNS = ROOT / "runs"
 TSV = ROOT / "results.tsv"
 
@@ -83,7 +83,7 @@ def main() -> int:
     ratio = mean(near_grad) / max(mean(far_grad), 1e-30)
 
     commit = subprocess.check_output(
-        ["git", "rev-parse", "--short", "HEAD"], cwd=ROOT.parent.parent
+        ["git", "rev-parse", "--short", "HEAD"], cwd=ROOT.parents[1]
     ).decode().strip()
 
     status = "done" if len(rows) == len(seeds) else "partial"

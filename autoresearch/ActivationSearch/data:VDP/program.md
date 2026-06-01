@@ -1,4 +1,4 @@
-# activation_search
+# autoresearch/ActivationSearch/data:VDP
 
 Autonomous search for the activation function that minimizes a sparsity-aware
 score on the VDP HJB problem. Pattern lifted from `~/autoresearch`: human edits
@@ -22,7 +22,7 @@ exhaustive ranking, not a hill-climb on `train.py`.
 
 ```
 LOOP FOREVER:
-  1. Read activation_search/results.tsv. Pick an activation that has not been
+  1. Read autoresearch/ActivationSearch/data:VDP/results.tsv. Pick an activation that has not been
      run yet, or one that looks promising and was only run with a subset of
      seeds. The initial activation list is:
        relu, tanh, gelu, silu, sin, softplus, matern52
@@ -33,7 +33,7 @@ LOOP FOREVER:
   2. For each seed in {42, 43, 44, 45, 46}:
        uv run python scripts/run_activation_experiment.py \
            --activation <name> --seed <seed> \
-           > activation_search/runs/<name>_seed<seed>.json 2>&1
+           > autoresearch/ActivationSearch/data:VDP/runs/<name>_seed<seed>.json 2>&1
      Each call prints one JSON line with per_gamma, best_gamma, best_score,
      best_h1, best_n, elapsed_s. If a run crashes (no JSON on the last line),
      read the file and decide: fix-and-retry if it's something dumb, otherwise
@@ -44,7 +44,7 @@ LOOP FOREVER:
        - mean_h1, mean_neurons over best_h1, best_n
        - best_gamma_mode = the gamma chosen most often across seeds (ties: any)
 
-  4. Append one row to activation_search/results.tsv:
+  4. Append one row to autoresearch/ActivationSearch/data:VDP/results.tsv:
        commit  activation  power  loss  seeds  mean_score  std_score
        mean_h1  mean_neurons  best_gamma_mode  status  description
      Where:

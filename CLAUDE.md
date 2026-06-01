@@ -33,13 +33,13 @@ Each line: **objective / tried / result / reference**.
    shifts accuracy/sparsity / gamma sweep across activations on both datasets /
    effect is activation-specific (largest for weak sharp/smooth-gated acts); the
    "more neurons ⇒ bigger gamma effect" rule holds only locally; squared-ReLU is
-   gamma-stable / `autoresearch/gamma_effect_summary.md`,
-   `autoresearch/gamma_pattern_check.md`.
+   gamma-stable / `autoresearch/meta_analysis/gamma/gamma_effect_summary.md`,
+   `autoresearch/meta_analysis/gamma/gamma_pattern_check.md`.
 4. **Semiconcave reference (analytic).** Validate a semiconcavity-aware model on a
    known semiconcave target (min of Gaussians, diagonal switching) / semiconcave
    vs signed PDPA_v2 over gammas/seeds + convex activation sweep / model trains
    cleanly, leaky_relu top activation; baseline that motivated the pendulum study
-   / `autoresearch/SemiconcaveFittingComparison/VDPReference/`.
+   / `autoresearch/SemiconcaveFittingComparison/data: VDP/`.
 5. **Pendulum swing-up — semiconcave vs pure NN at a real discontinuity.** Test
    whether enforcing semiconcavity helps a paper-backed Lipschitz-V /
    discontinuous-∇V value (Han–Yang) / PDAP semiconcave model vs signed model
@@ -47,7 +47,7 @@ Each line: **objective / tried / result / reference**.
    gammas, seeds 42–44 / semiconcavity does **not** help at the discontinuity
    (near-grad 2.98 vs 2.22 on PMP); single global ‖x‖² envelope mismatched to the
    periodic multi-well value; tie on smooth transient /
-   `autoresearch/SemiconcaveFittingComparison/PendulumSwingUp/extended_semiconcave_runs/`, `vault/semiconcave_model.md`,
+   `autoresearch/SemiconcaveFittingComparison/data: pendulum/extended_semiconcave_runs/`, `vault/semiconcave_model.md`,
    `vault/pendulum_bb_tpbvp.md`, `CONTEXT.md`.
 
 ## Code — core algorithm

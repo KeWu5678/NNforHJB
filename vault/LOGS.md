@@ -430,8 +430,8 @@ The runner supports:
 - `--activation all` or comma-separated activation names.
 - one or more seeds via `--seeds`.
 - full gamma sweeps via `--gammas`, or a single gamma via `--gamma`.
-- saved per-run JSON files under `autoresearch/SemiconcaveFittingComparison/VDPReference/runs`.
-- a TSV summary at `autoresearch/SemiconcaveFittingComparison/VDPReference/results.tsv`.
+- saved per-run JSON files under `autoresearch/SemiconcaveFittingComparison/data: VDP/runs`.
+- a TSV summary at `autoresearch/SemiconcaveFittingComparison/data: VDP/results.tsv`.
 
 Compact pilot command:
 
@@ -513,7 +513,7 @@ Command:
 Results are saved under:
 
 ```text
-autoresearch/SemiconcaveFittingComparison/VDPReference/model_comparison/
+autoresearch/SemiconcaveFittingComparison/data: VDP/model_comparison/
 ```
 
 Five-seed aggregate:
@@ -561,7 +561,7 @@ combined seeds   = [42, ..., 56]
 The combined table is saved at:
 
 ```text
-autoresearch/SemiconcaveFittingComparison/VDPReference/model_comparison/results_42_56.tsv
+autoresearch/SemiconcaveFittingComparison/data: VDP/model_comparison/results_42_56.tsv
 ```
 
 Combined 15-seed aggregate:
@@ -648,7 +648,7 @@ bent_id, elu, celu, quartic
 Combined five-seed aggregate is saved at:
 
 ```text
-autoresearch/SemiconcaveFittingComparison/VDPReference/v1_convex_activation_sweep_aggregate.tsv
+autoresearch/SemiconcaveFittingComparison/data: VDP/v1_convex_activation_sweep_aggregate.tsv
 ```
 
 Top five-seed results by H1:
@@ -666,7 +666,7 @@ The smooth convex alternatives `softplus`, `logcosh`, `ELU/CELU`, `quartic`, and
 Extended the top two alternatives, `leaky_relu` and `abs_act`, to seeds `[42, ..., 56]` and compared them with the 15-seed ReLU PDPA_v1 and ReLU PDPA_v2 baselines. Aggregate saved at:
 
 ```text
-autoresearch/SemiconcaveFittingComparison/VDPReference/v1_top_activation_vs_baselines_42_56.tsv
+autoresearch/SemiconcaveFittingComparison/data: VDP/v1_top_activation_vs_baselines_42_56.tsv
 ```
 
 15-seed aggregate:
@@ -740,7 +740,7 @@ gammas = [0, 1e-2, 1e-1, 1, 10]
 Combined same-activation aggregate is saved at:
 
 ```text
-autoresearch/SemiconcaveFittingComparison/VDPReference/same_activation_model_comparison_42_56.tsv
+autoresearch/SemiconcaveFittingComparison/data: VDP/same_activation_model_comparison_42_56.tsv
 ```
 
 15-seed same-activation means:

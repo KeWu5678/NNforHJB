@@ -1,4 +1,4 @@
-# activation_search — how to launch
+# VDP HJB Activation Search
 
 Autonomous search for the activation function that minimizes
 `err_h1_val * num_neurons` on the VDP HJB problem.
@@ -6,13 +6,13 @@ Autonomous search for the activation function that minimizes
 ## Layout
 
 ```
-activation_search/
-  program.md     — agent loop instructions (read by Claude Code)
+autoresearch/ActivationSearch/data:VDP/
+  README.md      — this file
+  SUMMARY.md     — archived result summary
+  program.md     — agent loop instructions
+  scripts/       — aggregation and plotting helpers
   results.tsv    — append-only scoreboard, tab-separated, NOT git-tracked
   runs/          — per-(activation, seed) JSON outputs from the script
-  README.md      — this file
-  vdp_hjb_summary/          — archived summary of the previous VDP HJB results
-  discontinuous_gradient/   — new autoresearch task for the analytic discontinuous-gradient dataset
 scripts/
   run_activation_experiment.py  — one (activation, seed) experiment
   run_discontinuous_activation_experiment.py  — one discontinuous-gradient experiment
@@ -27,18 +27,18 @@ scripts/
 2. Prompt:
 
    ```
-   Read activation_search/program.md and start the loop. Don't stop.
+   Read autoresearch/ActivationSearch/data:VDP/program.md and start the loop. Don't stop.
    ```
 
 3. Walk away. Claude will iterate activations, run 5 seeds each, and append
-   to `activation_search/results.tsv`. Per-run JSON detail lands in
-   `activation_search/runs/`.
+   to `autoresearch/ActivationSearch/data:VDP/results.tsv`. Per-run JSON detail lands in
+   `autoresearch/ActivationSearch/data:VDP/runs/`.
 4. To stop, interrupt the session.
 
 ## Reading the results
 
 ```
-column -t -s $'\t' activation_search/results.tsv | sort -k6 -n
+column -t -s $'\t' autoresearch/ActivationSearch/data:VDP/results.tsv | sort -k6 -n
 ```
 
 The activation with the lowest `mean_score` wins. Cross-check `mean_h1` and
