@@ -9,6 +9,11 @@ float reassociation while still catching real drift).
 
 Golden values: ``tests/fixtures/pdap_golden.npz``.  Regenerate from a known-good
 tree with ``PDAP_UPDATE_GOLDEN=1 pytest tests/test_pdap_equivalence.py``.
+
+Note: v1's baseline was deliberately re-captured when the semiconcave insertion
+was unified onto the shared ``profile_threshold`` strategy (the v2 refine loop).
+The change is a near-noise improvement (38 -> 37 neurons, errors within ~0.3%);
+v2 and v3 baselines are unchanged.
 """
 
 from __future__ import annotations
@@ -20,15 +25,15 @@ import numpy as np
 import pytest
 import torch
 
-from src.PDPA_v1 import PDPA_v1
-from src.PDPA_v2 import PDPA_v2
-from src.PDPA_v3 import PDPA_v3
+from src.PDAP import from_alias
 
 GOLDEN_PATH = Path(__file__).parent / "fixtures" / "pdap_golden.npz"
 SEED = 123
 RTOL, ATOL = 1e-5, 1e-7
 
-VARIANTS = {"v2": PDPA_v2, "v1": PDPA_v1, "v3": PDPA_v3}
+# The unified PDAP reproduces the former PDPA_v2/v3 bit-identically and PDPA_v1 at
+# its (refine-loop) re-baselined value; the aliases name the (model, insertion) bundles.
+VARIANTS = ["v2", "v1", "v3"]
 
 
 def _make_data(n: int = 60, seed: int = 0) -> dict:
@@ -49,10 +54,8 @@ def _run_summary(name: str) -> np.ndarray:
     """Run one variant for a short loop; return [final_neurons, l2, h1, last_loss]."""
     torch.manual_seed(SEED)
     np.random.seed(SEED)
-    pdap = VARIANTS[name](
-        _make_data(), alpha=1e-4, gamma=0.1, power=1.0, verbose=False
-    )
-    out = pdap.retrain(num_iterations=3, num_insertion=20, verbose=False)
+    pdap = from_alias(name, _make_data(), alpha=1e-4, gamma=0.1, power=1.0, verbose=False)
+    out = pdap.fit(num_iterations=3, num_insertion=20, verbose=False)
     return np.array(
         [
             float(out["final_neurons"]),

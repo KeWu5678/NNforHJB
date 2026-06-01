@@ -23,7 +23,7 @@ import torch
 from loguru import logger
 
 from ..SSN import SSN
-from ..utils import _phi
+from ..utils import _phi, _phi_prox
 
 
 TensorLike = torch.Tensor | np.ndarray
@@ -102,6 +102,14 @@ class SemiconcaveModel:
         c = torch.as_tensor(c, dtype=self.dtype).reshape(-1)
         self.W, self.b, self.c = W, b, c
         self._ensure_affine(W.shape[1])
+
+    def get_atoms(self) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Read the current support as (W (n,d), b (n,), c (n,)); empty if none."""
+        if self.W is None or self.n_neurons == 0:
+            d = self.input_dim or 0
+            z = torch.zeros(0, dtype=self.dtype)
+            return torch.zeros(0, d, dtype=self.dtype), z, z.clone()
+        return self.W.clone(), self.b.clone(), self.c.clone()
 
     @property
     def n_neurons(self) -> int:
@@ -226,6 +234,76 @@ class SemiconcaveModel:
         err_grad = torch.sqrt(dv_diff / dv_ref)
         err_h1 = torch.sqrt((v_diff + dv_diff) / (v_ref + dv_ref))
         return float(err_l2), float(err_grad), float(err_h1)
+
+    # ------------------------------------------------------------------ #
+    # Warm-start (nonnegative coordinate descent for new atoms) + uniform
+    # training entry, matching the PDAP Model interface.
+    # ------------------------------------------------------------------ #
+    def warm_start(
+        self,
+        W_new: torch.Tensor,
+        b_new: torch.Tensor,
+        data_train: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+        use_sphere: bool = True,
+        verbose: bool = True,
+    ) -> torch.Tensor:
+        """Nonnegative coordinate-descent initial outer weights c_new >= 0 (n_new,)."""
+        X, V, dV = data_train
+        K, d = X.shape
+        Nx = K * d
+        p = self.power
+        w1, w2 = self.loss_weights
+        n_new = W_new.shape[0]
+        if n_new == 0:
+            return torch.zeros(0, dtype=torch.float64)
+
+        Vp, dVp = self.predict_tensors(X)
+        res_v = (Vp - V).reshape(-1)
+        res_dv = (dVp - dV).reshape(-1)
+
+        with torch.no_grad():
+            pre = X @ W_new.T + b_new
+            act = self.activation(pre)
+            S_val = act ** p
+            if use_sphere:
+                dz = (pre > 0).double()
+            else:
+                pt = pre.detach().requires_grad_(True)
+                with torch.enable_grad():
+                    at = self.activation(pt)
+                    dz = torch.autograd.grad(at.sum(), pt)[0].detach()
+            dS_dz = dz if p == 1.0 else p * act ** (p - 1) * dz
+            S_grad = (dS_dz.unsqueeze(2) * W_new.unsqueeze(0)).permute(0, 2, 1).reshape(-1, n_new)
+
+            profiles = (w1 / Nx) * (S_val.T @ res_v) + (w2 / Nx) * (S_grad.T @ res_dv)
+            abs_p = profiles.abs()
+            best = int(abs_p.argmax().item())
+            eps_sqrt = float(torch.finfo(torch.float64).eps) ** 0.5
+            safe = abs_p.clamp_min(1e-30)
+            coeff = eps_sqrt * profiles / safe
+            coeff[best] = profiles[best] / safe[best]
+
+            Kv = S_val @ coeff
+            Kg = S_grad @ coeff
+            phat = -((w1 / Nx) * Kv.dot(res_v) + (w2 / Nx) * Kg.dot(res_dv))
+            what = (w1 / Nx) * Kv.dot(Kv) + (w2 / Nx) * Kg.dot(Kg)
+            if phat <= -self.alpha and what > 1e-30:
+                tau = _phi_prox(self.alpha / what, -phat / what, self.th, self.gamma, q=self.q)
+            else:
+                tau = 0.0
+            c_new = (tau * coeff).clamp_min(0.0)
+        return c_new.reshape(-1)
+
+    def fit_outer_weights(
+        self,
+        data_train: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+        data_valid: Tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None = None,
+        iterations: int = 20,
+        display_every: int = 2,
+    ) -> bool:
+        """Uniform training entry: SSN on the already-set atoms (ignores valid set)."""
+        x, V, dV = data_train
+        return self.train_ssn(x, V, dV, iterations=iterations)
 
     # ------------------------------------------------------------------ #
     # SSN outer solve
