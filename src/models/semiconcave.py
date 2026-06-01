@@ -22,8 +22,8 @@ import numpy as np
 import torch
 from loguru import logger
 
-from .SSN import SSN
-from .utils import _phi
+from ..SSN import SSN
+from ..utils import _phi
 
 
 TensorLike = torch.Tensor | np.ndarray

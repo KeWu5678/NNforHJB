@@ -10,7 +10,7 @@ operator can actually zero them out, enabling gamma-dependent sparsity.
 
 from __future__ import annotations
 from typing import Any, Dict, List, Callable, Optional, Tuple
-from .model import model
+from .models.signed import SignedModel
 from .utils import _phi_prox
 import numpy as np
 from loguru import logger
@@ -59,7 +59,7 @@ class PDPA_v2:
         training_pct = (N_total - 1) / N_total
 
         # Single model: SSN on outer weights only (MATLAB default: optimize_x=false)
-        self.model = model(
+        self.model = SignedModel(
             alpha=self.alpha,
             gamma=gamma,
             optimizer=optimizer,

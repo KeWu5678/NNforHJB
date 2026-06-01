@@ -4,7 +4,7 @@ import numpy as np
 import torch
 
 from src.SSN import SSN
-from src.semiconcave_model import SemiconcaveModel
+from src.models.semiconcave import SemiconcaveModel
 
 
 def _atoms(n, d, seed=0):

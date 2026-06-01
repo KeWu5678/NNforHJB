@@ -57,8 +57,8 @@ class SSN(Optimizer):
         ``data_hessian`` (the Gauss-Newton Hessian of the data term) must be set
         by the caller on the instance before each ``step`` — an API wart inherited
         from the original design: it really is a per-step input that would be
-        cleaner to pass through the closure, but callers (model.py,
-        semiconcave_model.py) currently poke it as an attribute.
+        cleaner to pass through the closure, but callers (models/signed.py,
+        models/semiconcave.py) currently poke it as an attribute.
     """
     
     def __init__(

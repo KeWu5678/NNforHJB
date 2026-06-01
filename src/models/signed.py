@@ -10,12 +10,12 @@ from typing import Optional, Tuple
 import torch
 import os
 from loguru import logger
-from .SSN import SSN
-from .net import ShallowNetwork
-from .utils import _phi
+from ..SSN import SSN
+from ..net import ShallowNetwork
+from ..utils import _phi
 
 
-class model:
+class SignedModel:
     """
     shallow neural networks
     """
@@ -266,8 +266,22 @@ class model:
         err_h1 = torch.sqrt((v_diff_sq + dv_diff_sq) / (v_true_sq + dv_true_sq).clamp_min(1e-30))
         return float(err_l2.item()), float(err_grad.item()), float(err_h1.item())
 
+    def predict_tensors(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Return (V, dV) at x as detached tensors, V:(N,1), dV:(N,d).
+
+        Uniform with SemiconcaveModel.predict_tensors so the PDAP loop and the
+        insertion strategy can read residuals from any model the same way.
+        """
+        if self.net is None:
+            raise RuntimeError("network not created yet; call train()/_create_network() first")
+        x_req = x.detach().clone().requires_grad_(True)
+        with torch.enable_grad():
+            V = self.net(x_req)
+            dV = torch.autograd.grad(V.sum(), x_req, create_graph=False)[0]
+        return V.detach(), dV.detach()
+
     def train(
-        self, 
+        self,
         data_train: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
         data_valid: Tuple[torch.Tensor, torch.Tensor, torch.Tensor], 
         inner_weights: Optional[torch.Tensor] = None, 

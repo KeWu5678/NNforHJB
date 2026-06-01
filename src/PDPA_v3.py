@@ -13,7 +13,7 @@ criterion is used directly as the initial outer weight.
 
 from __future__ import annotations
 from typing import Any, Dict, List, Callable, Optional, Tuple
-from .model import model
+from .models.signed import SignedModel
 import numpy as np
 from loguru import logger
 import torch
@@ -136,7 +136,7 @@ class PDPA_v3:
         N_total = data["x"].shape[0]
         training_pct = (N_total - 1) / N_total
 
-        self.model = model(
+        self.model = SignedModel(
             alpha=self.alpha,
             gamma=gamma,
             optimizer=optimizer,

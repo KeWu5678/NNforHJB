@@ -27,7 +27,7 @@ import torch
 from loguru import logger
 
 from .PDPA_v2 import PDPA_v2
-from .semiconcave_model import SemiconcaveModel
+from .models.semiconcave import SemiconcaveModel
 from .utils import _phi_prox
 
 
