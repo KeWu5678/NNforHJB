@@ -20,11 +20,12 @@ dependencies = [
     # Jupyter
     "jupyter>=1.1",
     "ipykernel>=6.29",
+    # Tests
+    "pytest>=8.3",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.3",
     "pytest-cov>=6.0",
 ]
 
@@ -34,3 +35,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["src*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

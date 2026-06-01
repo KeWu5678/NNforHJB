@@ -10,13 +10,12 @@ from typing import Optional, Tuple
 import torch
 import os
 from loguru import logger
-from .ssn import SSN
-from .ssn_tr import SSN_TR
-from .net import ShallowNetwork
-from .utils import _phi
+from ..SSN import SSN
+from ..net import ShallowNetwork
+from ..utils import _phi, _phi_prox
 
 
-class model:
+class SignedModel:
     """
     shallow neural networks
     """
@@ -180,8 +179,9 @@ class model:
         if self.optimizer_type in ["SSN", "SSN_TR"]:
             if self.train_outerweights == True:
                 output_params = [self.net.output.weight]
-                optimizer_class = SSN if self.optimizer_type == "SSN" else SSN_TR
-                self.optimizer = optimizer_class(output_params, alpha=self.alpha, gamma=self.gamma, th=self.th, lr=self.lr, power=self.power)
+                # SSN_TR folded into SSN as the trust-region (Steihaug-CG) method.
+                method = "steihaug_cg" if self.optimizer_type == "SSN_TR" else "levenberg_marquardt"
+                self.optimizer = SSN(output_params, alpha=self.alpha, gamma=self.gamma, th=self.th, lr=self.lr, power=self.power, method=method)
                 if self.verbose:
                     logger.info(f"Using {self.optimizer_type} optimizer with alpha={self.alpha}, gamma={self.gamma}, th={self.th}, lr ={self.lr}")
             else:
@@ -266,8 +266,130 @@ class model:
         err_h1 = torch.sqrt((v_diff_sq + dv_diff_sq) / (v_true_sq + dv_true_sq).clamp_min(1e-30))
         return float(err_l2.item()), float(err_grad.item()), float(err_h1.item())
 
+    def predict_tensors(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Return (V, dV) at x as detached tensors, V:(N,1), dV:(N,d).
+
+        Uniform with SemiconcaveModel.predict_tensors so the PDAP loop and the
+        insertion strategy can read residuals from any model the same way.
+        """
+        if self.net is None:
+            raise RuntimeError("network not created yet; call set_atoms() first")
+        x_req = x.detach().clone().requires_grad_(True)
+        with torch.enable_grad():
+            V = self.net(x_req)
+            dV = torch.autograd.grad(V.sum(), x_req, create_graph=False)[0]
+        return V.detach(), dV.detach()
+
+    # ------------------------------------------------------------------ #
+    # Uniform atom interface (matches SemiconcaveModel) for the PDAP loop.
+    # Canonical representation: W (n,d), b (n,), c (n,).  The signed network
+    # stores c as the (1,n) output weight; set/get reshape across that.
+    # ------------------------------------------------------------------ #
+    def set_atoms(self, W: torch.Tensor, b: torch.Tensor, c: torch.Tensor) -> None:
+        """Establish the current support by (re)building the network."""
+        W = torch.as_tensor(W, dtype=torch.float64)
+        b = torch.as_tensor(b, dtype=torch.float64).reshape(-1)
+        c = torch.as_tensor(c, dtype=torch.float64).reshape(1, -1)
+        self._create_network(W, b, c)
+
+    def get_atoms(self) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Read the current support as (W (n,d), b (n,), c (n,))."""
+        if self.net is None:
+            raise RuntimeError("network not created yet; call set_atoms() first")
+        W = self.net.hidden.weight.detach().clone()
+        b = self.net.hidden.bias.detach().clone()
+        c = self.net.output.weight.detach().reshape(-1).clone()
+        return W, b, c
+
+    @property
+    def n_neurons(self) -> int:
+        return 0 if self.net is None else int(self.net.hidden.weight.shape[0])
+
+    def warm_start(
+        self,
+        W_new: torch.Tensor,
+        b_new: torch.Tensor,
+        data_train: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+        use_sphere: bool = True,
+        verbose: bool = True,
+    ) -> torch.Tensor:
+        """Coordinate-descent initial outer weights for new neurons, shape (n_new,).
+
+        1D proximal step along the combined new-atom direction against the current
+        model residual (MATLAB PDAPmultisemidiscrete.m:104-147).  Residual is taken
+        from the current network (or -target when no atoms exist yet).
+        """
+        X_train, V_train, dV_train = data_train
+        N, d = X_train.shape[0], X_train.shape[1]
+        Nx = N * d
+        p = self.power
+        w1, w2 = self.loss_weights
+        alpha, th, gamma = self.alpha, self.th, self.gamma
+        n_new = W_new.shape[0]
+        if n_new == 0:
+            return torch.zeros(0, dtype=torch.float64)
+
+        X_det = X_train.detach()
+        if self.net is not None:
+            pred_v, pred_dv = self.predict_tensors(X_det)
+            res_val = (pred_v - V_train).detach().reshape(-1)
+            res_grad = (pred_dv - dV_train).detach().reshape(-1)
+        else:
+            res_val = -V_train.detach().reshape(-1)
+            res_grad = -dV_train.detach().reshape(-1)
+
+        with torch.no_grad():
+            pre = X_det @ W_new.T + b_new
+            act = self.activation(pre)
+            S_val_new = act ** p
+            if use_sphere:
+                act_deriv = (pre > 0).double()
+            else:
+                pre_tmp = pre.detach().requires_grad_(True)
+                with torch.enable_grad():
+                    act_tmp = self.activation(pre_tmp)
+                    act_deriv = torch.autograd.grad(act_tmp.sum(), pre_tmp, create_graph=False)[0].detach()
+            dS_dz = act_deriv if p == 1.0 else p * act ** (p - 1) * act_deriv
+            dS_dx = dS_dz.unsqueeze(2) * W_new.unsqueeze(0)
+            S_grad_new = dS_dx.permute(0, 2, 1).reshape(-1, n_new)
+
+            profiles = (w1 / Nx) * (S_val_new.T @ res_val) + (w2 / Nx) * (S_grad_new.T @ res_grad)
+            abs_profiles = profiles.abs()
+            best_idx = int(abs_profiles.argmax().item())
+            eps_sqrt = float(torch.finfo(torch.float64).eps) ** 0.5
+            safe_abs = abs_profiles.clamp_min(1e-30)
+            coeff = -eps_sqrt * profiles / safe_abs
+            coeff[best_idx] = -profiles[best_idx] / safe_abs[best_idx]
+
+            Kvhat_val = S_val_new @ coeff
+            Kvhat_grad = S_grad_new @ coeff
+            phat = float((w1 / Nx) * Kvhat_val.dot(res_val) + (w2 / Nx) * Kvhat_grad.dot(res_grad))
+            what = float((w1 / Nx) * Kvhat_val.dot(Kvhat_val) + (w2 / Nx) * Kvhat_grad.dot(Kvhat_grad))
+
+            if phat <= -alpha and what > 1e-30:
+                tau = _phi_prox(alpha / what, -phat / what, th, gamma, q=2.0 / (p + 1.0))
+            else:
+                tau = 0.0
+            W_outer_new = tau * coeff
+            if verbose:
+                logger.info(
+                    f"Coord. descent: phat={phat:.2e}, what={what:.2e}, tau={tau:.4e}, "
+                    f"|W_outer| range=[{W_outer_new.abs().min():.2e}, {W_outer_new.abs().max():.2e}]"
+                )
+        return W_outer_new.reshape(-1)
+
+    def fit_outer_weights(
+        self,
+        data_train: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+        data_valid: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+        iterations: int = 20,
+        display_every: int = 2,
+    ) -> bool:
+        """Run the SSN outer-weight solve on the already-set atoms (see train())."""
+        return self._fit_loop(data_train, data_valid, iterations, display_every)
+
     def train(
-        self, 
+        self,
         data_train: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
         data_valid: Tuple[torch.Tensor, torch.Tensor, torch.Tensor], 
         inner_weights: Optional[torch.Tensor] = None, 
@@ -292,10 +414,20 @@ class model:
             False if SSN line search failed on every step.
         """
 
+        self._create_network(inner_weights, inner_bias, outer_weights)
+        return self._fit_loop(data_train, data_valid, iterations, display_every)
+
+    def _fit_loop(
+        self,
+        data_train: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+        data_valid: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+        iterations: int,
+        display_every: int,
+    ) -> bool:
+        """SSN outer-weight solve on the already-built network (the body of train)."""
         # Initialize
         train_x_tensor, train_v_tensor, train_dv_tensor = data_train
         valid_x_tensor, valid_v_tensor, valid_dv_tensor = data_valid
-        self._create_network(inner_weights, inner_bias, outer_weights)
         self._setup_optimizer()
         logger.info("Starting network training session") if self.verbose else None
         
@@ -321,7 +453,7 @@ class model:
         successful_steps = 0
         for epoch in range(iterations):
             self.optimizer.zero_grad()
-            if isinstance(self.optimizer, (SSN, SSN_TR)):
+            if isinstance(self.optimizer, SSN):
                 x_detach = train_x_tensor.detach()
                 S = self.net.forward_network_matrix(x_detach).detach()       # (N, n)
                 S_grad = self.net.forward_gradient_kernel(x_detach).detach() # (N*d, n)
@@ -359,7 +491,7 @@ class model:
             #     best_state = {k: v.detach().clone() for k, v in self.net.state_dict().items()}
 
             # Early-stop SSN training if line search fails repeatedly
-            if isinstance(self.optimizer, (SSN, SSN_TR)):
+            if isinstance(self.optimizer, SSN):
                 step_success = bool(getattr(self.optimizer, "last_step_success", True))
                 if not step_success:
                     consecutive_failed_ssn_steps += 1

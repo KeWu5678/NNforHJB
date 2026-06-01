@@ -21,7 +21,7 @@ import torch.nn.functional as F
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from src.PDPA_v2 import PDPA_v2
+from src.PDAP import from_alias
 from src.activations import matern52
 
 
@@ -362,12 +362,13 @@ def main() -> int:
     t0 = time.time()
     for gamma in GAMMAS:
         set_seed(args.seed)
-        pdpa = PDPA_v2(
+        pdpa = from_alias(
+            "v2",
             data=data, alpha=ALPHA, gamma=gamma, power=POWER,
             activation=activation_fn, use_sphere=use_sphere,
             loss_weights=LOSS_WEIGHTS, verbose=False,
         )
-        result = pdpa.retrain(
+        result = pdpa.fit(
             num_iterations=args.num_iterations,
             num_insertion=args.num_insertion,
             threshold=PRUNING_THRESHOLD,

@@ -1,137 +1,111 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code working in this repository. This file is the top-level
+map; deeper technical detail lives in `vault/` (linked per section).
 
 ## Project Overview
-Sparse neural network training framework for solving Hamilton-Jacobi-Bellman (HJB) equations using primal-dual proximal algorithms (PDPA) with non-convex regularization and semismooth Newton (SSN) optimization. The Python implementation ports and extends a MATLAB reference at `/Users/ruizhechao/Documents/NonConvexSparseNN/`.
+Sparse shallow-network framework for solving Hamilton-Jacobi-Bellman (HJB)
+equations from value/gradient samples, using a primal-dual proximal algorithm
+(PDAP) with non-convex regularization and a semismooth Newton (SSN) outer solve.
+Ports and extends a MATLAB reference at `/Users/ruizhechao/Documents/NonConvexSparseNN/`.
 
-### Algorithm Flow (PDPA_v2)
+## References
+Thesis & papers: `/Users/chaoruiz/Documents/NotePaper/MasterThesis/`
+- **Non-convex regularization** (main): `nonconvexity/noncovex regulerization.pdf`
+- **Gradient-augmented regression** (main): `PDE/Gradient-Augmented Regression.pdf`
+- Supporting: `nonconvexity/` (integral representation of convex functions on
+  measures, l.s.c. of the regularizer, relaxation of non-convex functionals),
+  `PDE/` (Barron, char_HJB).
 
-```
-PDPA_v1/v2.retrain() loop (15-20 iterations):
-  1. Insertion: sample S^d → L-BFGS maximize profile → merge duplicates → accept if |p(ω)| > α
-  2. Warm-start: coordinate descent (v2) or Adam (v1) to give new neurons non-zero weights
-  3. SSN: semismooth Newton on outer weights (frozen inner weights), 20 iterations
-  4. Prune: merge near-duplicate neurons (cosine similarity), remove zeros from proximal operator
-```
+## Research Directions
+Each line: **objective / tried / result / reference**.
 
-### Key Modules (`src/`)
+1. **Activation search — smooth VDP HJB.** Find the best accuracy↔sparsity
+   activation on the smooth VDP value / 132 variants with PDPA_v2 (power=1, H1,
+   gamma∈[0,.01,.1,1,10]) / softplus = best sparse family, GELU/Mish lower H1 at
+   ~2× neurons, SmoothReLU best H1 but dense /
+   `autoresearch/ActivationSearch/data:VDP/SUMMARY.md`.
+2. **Activation search — discontinuous gradient.** Best activation at a ∇V jump
+   (near_grad) / activation families on analytic `x1 + x2|x2|/2 = 0`, near/far
+   masks / spherical leaky squared-ReLU (`leaky_relu2`, sphere, α≈0.02) wins /
+   `autoresearch/ActivationSearch/data:analytical/SUMMARY.md`.
+3. **Non-convexity (gamma) effect.** Quantify how the non-convex penalty gamma
+   shifts accuracy/sparsity / gamma sweep across activations on both datasets /
+   effect is activation-specific (largest for weak sharp/smooth-gated acts); the
+   "more neurons ⇒ bigger gamma effect" rule holds only locally; squared-ReLU is
+   gamma-stable / `autoresearch/gamma_effect_summary.md`,
+   `autoresearch/gamma_pattern_check.md`.
+4. **Semiconcave reference (analytic).** Validate a semiconcavity-aware model on a
+   known semiconcave target (min of Gaussians, diagonal switching) / semiconcave
+   vs signed PDPA_v2 over gammas/seeds + convex activation sweep / model trains
+   cleanly, leaky_relu top activation; baseline that motivated the pendulum study
+   / `autoresearch/SemiconcaveFittingComparison/VDPReference/`.
+5. **Pendulum swing-up — semiconcave vs pure NN at a real discontinuity.** Test
+   whether enforcing semiconcavity helps a paper-backed Lipschitz-V /
+   discontinuous-∇V value (Han–Yang) / PDAP semiconcave model vs signed model
+   under the *same* SSN pipeline on PMP (∞-horizon) and transient (T=3) data,
+   gammas, seeds 42–44 / semiconcavity does **not** help at the discontinuity
+   (near-grad 2.98 vs 2.22 on PMP); single global ‖x‖² envelope mismatched to the
+   periodic multi-well value; tie on smooth transient /
+   `autoresearch/SemiconcaveFittingComparison/PendulumSwingUp/extended_semiconcave_runs/`, `vault/semiconcave_model.md`,
+   `vault/pendulum_bb_tpbvp.md`, `CONTEXT.md`.
 
-- **`PDPA_v2.py`** — Current algorithm matching MATLAB `PDAPmultisemidiscrete.m`. Coordinate descent warm-start, iterative insertion with merge+re-optimize.
-- **`PDPA_v1.py`** — Earlier version using Adam warm-start instead of coordinate descent.
-- **`model.py`** — Training wrapper: data prep, network creation, loss computation, optimizer dispatch. Loss normalized by `Nx = N * d` (matching MATLAB `numel(xhat)`).
-- **`net.py`** — `ShallowNetwork` PyTorch module: `input → hidden (ReLU^p) → output`. Provides `forward_network_matrix()` and `forward_gradient_kernel()` for SSN.
-- **`ssn.py`** — Semismooth Newton optimizer. Accepts `power` param; stores `q = 2/(p+1)` for power-transformed penalty. Assumes NOC holds; requires non-zero initial weights. Uses data-only gradient (autograd gives full objective; SSN adds regularization separately).
-- **`ssn_tr.py`** — Trust-region variant of SSN using MPCG inner solve. Passes `power` through to SSN base class.
-- **`utils.py`** — Penalty `_phi(t, th, gamma)`, derivatives `_dphi`/`_ddphi`, proximal operators `_compute_prox(v, mu, q)`, `_compute_dprox(v, mu, q, prox_result)`, `_phi_prox(sigma, g, th, gamma, q)` (all accept optional `q` for power-transformed penalty), stereographic projection.
-- **`metric.py`** — Experiment analysis utilities: `summarize_final_neuron_count_and_loss` (per-gamma neuron count / best loss table), `plot_loss_vs_neurons_by_gamma`, `plot_vdp_value_scatter3d`, `print_experiment_hyperparameters`. Requires `pandas` for the `table_df` output key.
+## Code — core algorithm
+PDAP outer loop (`PDAP.fit`, 15–20 iters):
+1. **Insertion** — sample S^d, L-BFGS-maximize the dual profile, merge duplicates,
+   accept atoms (signed model: `|p(ω)|>α` two-sided; semiconcave: `p(ω)>α`
+   one-sided/convex; `finite_step`: accept where `ΔJ(c*;ω)<0`).
+2. **Warm-start** — coordinate descent gives new neurons non-zero outer weights
+   (`finite_step` skips it: `c*` comes from the insertion criterion).
+3. **SSN** — semismooth Newton on outer weights, inner weights frozen (~20 iters).
+4. **Prune** — merge near-duplicates (cosine sim on S^d), drop proximal zeros.
 
-### Data Flow
+**One `PDAP` class, two axes** (`PDAP(model=, insertion=)`; `from_alias("v1"/"v2"/"v3")`):
+- `model="signed"` — pure signed network `V = Σ c_i σ(w_i·x+b_i)^p`, all `c_i` penalized.
+- `model="semiconcave"` — `V = 0.5·C·‖x‖² − g(x)`, convex `g` (`c_i ≥ 0`) + affine;
+  `C`/affine trainable but **unpenalized**.
+- `insertion="profile"` (dual-threshold) | `"finite_step"` (ΔJ<0, for q<1).
+- Aliases: `v2`=signed+profile, `v1`=semiconcave+profile, `v3`=signed+finite_step.
 
-```
-VDP ODE solver (data_generation_VDP.py) → dict {x, v, dv} → PDPA_v2 → pickle in models/
-```
+Modules (`src/`): `net.py`, `utils.py`, `metric.py`, the `src/SSN/` optimizer
+package, the `src/models/` model package, the `src/PDAP/` outer-loop package, plus
+the open-loop data subsystem in `src/OpenLoop/` (solvers, the pendulum PMP sampler,
+and the VDP / pendulum dataset generators).
 
-Experiments run in `notebook/pdpa_vdp.ipynb`. Results saved as pickle files in `models/experiment_N/`.
+The **`src/SSN/` package** is one configurable semismooth-Newton optimizer
+(layout mirrors `torch.optim`): `optimizer.py` (`SSN`), `strategies.py`
+(`levenberg_marquardt` damped-Newton / `steihaug_cg` trust-region globalizations,
+selected by `method=`), `prox.py` + `penalty.py` (kernels, re-exported by
+`utils.py`), `mpcg.py`. The signed network, the semiconcave model (via
+`penalized_mask`/`nonneg_mask`), and the old trust-region variant are all
+configurations of this single class — the former `ssn.py`/`ssn_tr.py`/
+`ssn_semiconcave.py` no longer exist.
 
-## MATLAB Reference
+The **`src/models/` package** holds the parametric value-function models behind a
+shared `Model` protocol (`base.py`): `signed.py` (`SignedModel`) and
+`semiconcave.py` (`SemiconcaveModel`). Both expose the uniform interface the loop
+drives — `set_atoms`/`get_atoms`/`warm_start`/`fit_outer_weights`/`predict_tensors`.
+The former `model.py`/`semiconcave_model.py` no longer exist.
 
-Reference implementation: `/Users/ruizhechao/Documents/NonConvexSparseNN/`
+The **`src/PDAP/` package** is the unified outer loop: `pdap.py` (`PDAP` + `fit`),
+`insertion.py` (`profile_threshold` / `finite_step` strategies + `solve_insertion_weight`),
+`registry.py` (aliases). The former `PDPA.py`/`PDPA_v1.py`/`PDPA_v2.py`/`PDPA_v3.py`
+no longer exist.
 
-Key files and their Python counterparts:
-| MATLAB | Python | Notes |
-|--------|--------|-------|
-| `PDAPmultisemidiscrete.m` | `PDPA_v2.py` | Main PDAP loop (NOT `PDAPsemidiscrete.m`) |
-| `SSN.m` | `ssn.py` | Semismooth Newton optimizer |
-| `setup_problem_NN_2d_from_xhat.m` | `model.py` + `net.py` | Kernel, loss, find_max |
-| `run_vdp_2d_from_mat.m` | `notebook/pdpa_vdp.ipynb` | Experiment runner |
-
-### Known Differences from MATLAB
-
-- **Kernel**: MATLAB uses smoothed ReLU (`delta=0.001`), Python uses exact `torch.relu`
-- **Parameterization**: MATLAB optimizes in stereographic R^d, Python on sphere S^d (when `use_sphere=True`)
-- **Postprocess**: MATLAB merges by Euclidean distance in stereographic space; Python merges by cosine similarity on S^d
-- **Gamma sweep**: MATLAB warm-starts each gamma from previous solution; Python runs independently
-- **General power p**: Python supports `ReLU^p` with power-transformed penalty `phi(|u|^q)`, `q=2/(p+1)`. MATLAB only supports `p=1`.
-
-## Critical Parameters (matching MATLAB)
-
-| Parameter | Value | Source |
-|-----------|-------|--------|
-| `alpha` | `1e-5` | `run_vdp_2d_from_mat.m:105` |
-| `th` | `0.5` | `setup_problem_NN_2d_from_xhat.m:183` |
-| `delta` (MATLAB only) | `0.001` | `setup_problem_NN_2d_from_xhat.m:147` |
-| Loss normalization | `Nx = d * N_points` | `setup_problem_NN_2d_from_xhat.m:198` |
-| Max PDAP iterations | `15` | `run_vdp_2d_from_mat.m:12` |
-| Max insert per step | `15` | `PDAPmultisemidiscrete.m:95` |
-| SSN iterations | `20` | Converges in 3-4 steps |
-
-## Critical Implementation Notes
-
-1. **SSN requires non-zero initial weights**: `_initialize_q` assumes NOC → `G(q)=0` at `u=0` → `dq=0`. Must warm-start before SSN.
-2. **SSN gradient must be data-only**: Autograd gives full objective gradient; SSN adds `alpha*dphi` separately. Double-counting breaks convergence.
-3. **SSN line search uses full objective**: Data loss + regularization. Without regularization, sparsifying steps get rejected.
-4. **Loss normalization**: Must use `Nx = N * d`, not `N`. Mismatch weakens regularization relative to data term.
-5. **Insertion deduplication**: L-BFGS candidates converge to same maximum with exact ReLU. Must merge within insertion by cosine similarity and use iterative merge+re-optimize loop.
-6. **Sphere parameterization (`use_sphere`)**: For positively homogeneous activations (ReLU), inner weights must be constrained to the unit sphere S^d (`use_sphere=True`). Without this, L-BFGS pushes weights to extreme norms (1e+15), causing kernel matrix overflow (`what=nan`) and coordinate descent failure.
-
-## Power-Transformed Penalty (general activation power p)
-
-When the activation is `ReLU^p` with `p != 1`, the regularization uses `phi(|u|^q)` instead of `phi(|u|)`, where `q = 2/(p+1)`. For `p=1`, `q=1` and everything reduces to the standard case.
-
-**Files modified** (all changes are backward-compatible for p=1):
-- `utils.py`: `_compute_prox(v, mu, q)`, `_compute_dprox(v, mu, q, prox_result)`, `_phi_prox(sigma, g, th, gamma, q)` — all accept optional `q` parameter. For `q != 1`, uses Newton's method instead of closed-form.
-- `ssn.py`: Stores `self.q = 2/(power+1)`. `_initialize_q`, `_initilize_G`, `_DG` use chain-rule derivatives with `active` mask for `|u|^{q-1}` singularity at `u=0`. `step` passes `self.q` to proximal operators.
-- `ssn_tr.py`: Passes `power` to `SSN.__init__`, passes `self.q` to proximal operators.
-- `model.py`: `_compute_loss` applies `|u|^q` transform before `_phi`. `_setup_optimizer` passes `power` to SSN/SSN_TR.
-- `PDPA_v2.py`: `_coordinate_descent_init` passes `q=2/(p+1)` to `_phi_prox`.
-
-**Key math** (derivatives w.r.t. `t = |u|`, for `t > 0`):
-- Full penalty gradient: `q * t^{q-1} * dphi(t^q)`
-- Correction 2nd derivative: `q(q-1) * t^{q-2} * (dphi(t^q)-1) + q^2 * t^{2q-2} * ddphi(t^q)`
-- Proximal of `mu * |.|^q` for `q < 1`: Newton solve of `t + mu*q*t^{q-1} = |v|` with threshold `t* = [mu*q*(1-q)]^{1/(2-q)}`
-
-### SSN Proximal Dead Zone Bug (p != 1, OPEN)
-
-**Status**: Diagnosed but NOT fixed. SSN currently broken for `power != 1` (q < 1).
-
-**Stashed fix attempt**: `git stash@{0}` contains a partial fix (DPc clamping + active set preservation + dead zone zeroing). It was stashed because it also broke the regular `power=1` case. Apply with `git stash pop`, discard with `git stash drop`.
-
-**Symptom**: SSN line search fails on every step when `power != 1` (e.g., `power=2.1`, `q=0.645`). Train loss decreases only from coordinate descent warm-start; SSN contributes nothing.
-
-**Root cause 1 — Proximal jump discontinuity (two-branch problem)**:
-The proximal of `mu * |.|^q` for `q < 1` has a jump discontinuity. The stationarity condition `t + mu*q*t^{q-1} = v` has **two roots** for `v > v_thresh`: `t_large` (local min, SOC > 0) and `t_small` (local max, SOC < 0). `_compute_prox` always returns `t_large`.
-
-SSN's `_initialize_q` inverts the FOC by plugging `t = |u_i|` to get `q_var_i`. For small weights (`|u_i| < t*`), `|u_i|` is the `t_small` root. Then `_compute_prox(q_var)` returns `t_large != |u_i|`, so `prox(q) != params` — the fundamental SSN consistency assumption breaks.
-
-For `q=1`, the equation `t + mu = v` has a unique root (no ambiguity).
-
-**Root cause 2 — Indefinite Jacobian DG**:
-For `q < 1`, the proximal Jacobian `DPc_i = 1/SOC_i` can exceed 1 when `SOC_i < 1` (weights near the dead-zone boundary). This makes the generalized Jacobian DG indefinite:
-```
-DG_{ii} = c + (H_data_{ii} - c) * DPc_i
-```
-When `DPc_i > 1` and `H_data_{ii} < c`, `DG_{ii} < 0`. The Newton direction becomes an ascent direction, so the line search can never succeed.
-
-For `q=1`, `DPc_i` is always in `{0, 1}` (a projection), so `DG` is always PSD.
-
-**Root cause 3 — Inactive weight activation via proximal jump**:
-For inactive weights (`u_i = 0`), `_initialize_q` sets `q_i = -(1/c) * grad_flat_i`. If `|grad_flat_i| / c > v_thresh`, `prox(q_i)` jumps to a nonzero value, activating the neuron. For `q=1` this is smooth (soft thresholding continuous). For `q<1` it's a discontinuous jump from 0 to `~t*`.
-
-**Key threshold**: `t* = [mu*q*(1-q)]^{1/(2-q)}` where `mu = alpha/c`, `c = 1 + alpha*gamma`. For `alpha=1e-5, gamma=0, q=0.645`: `t* ~ 7e-5`. Weights below this are in the dead zone.
-
-**Stashed fix approach** (in `git stash@{0}`):
-1. Dead-zone zeroing: zero weights where SOC <= 0 before SSN, force `q[dead_zone] = 0`
-2. DPc clamping: clamp `_compute_dprox` diagonal to `[0, 1]` in `_DG` to keep Jacobian PSD
-3. Active set preservation: force `unew[inactive] = 0` after prox to prevent jump activation
-4. Inactive q clamping: force `q[inactive] = 0` for all zero-weight entries
-
-**Why the stashed fix failed**: The combination of changes also broke the `power=1` (q=1) case. The changes to `_initialize_q`, `_initilize_G`, and `_DG` for general q altered the code paths used by q=1 as well. Need to ensure backward compatibility before re-applying.
-
-**Visualization**: `scripts/visualize_proximal_deadzone.py` produces a 4-panel figure showing the FOC, SOC, proximal objective, and jump discontinuity.
+**Technical detail → `vault/`:**
+- Full pipeline, MATLAB mapping, known differences, critical parameters, gotchas
+  (loss `Nx=N·d`, data-only SSN gradient, sphere parameterization, data scaling),
+  and a script index: `vault/algorithm.md`.
+- Power-q penalty `φ(|u|^q)`, `q=2/(p+1)`, and the proximal dead-zone bug (p≠1,
+  OPEN): `vault/power_q_penalty.md`.
+- Semiconcave model, the masked-nonneg-prox / unpenalized-coords configuration of
+  `SSN`, augmented Hessian, envelope-mismatch finding: `vault/semiconcave_model.md`.
+- Pendulum open-loop TPBVP/PMP derivation: `vault/pendulum_bb_tpbvp.md`.
+- Session/debugging history: `vault/LOGS.md`.
 
 ## Directory Notes
-
-- `src/` — Active code1
-- `outdated/` — Deprecated experiments
-- `logs/` — Session documentation (see `2025-02-15.md` for debugging history)
+- `src/` — active code; `scripts/` — experiment runners & dataset generators (index in `vault/algorithm.md`).
+- `autoresearch/` — research outputs (per-direction subfolders + summaries).
+- `vault/` — layered technical docs (this file links them).
+- `rawdata/` — generated datasets/plots; `outdated/` — deprecated experiments.
+- `CONTEXT.md` — domain language / example-selection notes for the open-loop study.
