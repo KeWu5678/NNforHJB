@@ -10,6 +10,7 @@ from src.OpenLoop.pendulum.finite_horizon_generator import (
 )
 from src.OpenLoop.pendulum.finite_horizon_problem import PendulumSwingUpProblem
 from src.OpenLoop.pendulum.pmp_sampler import PendulumPmpParameters, PendulumPmpSampler
+from src.OpenLoop.pendulum.swingup_dynamics import PendulumSwingUpDynamics
 
 __all__ = [
     "ForwardBackwardOpenLoopOptimizer",
@@ -19,4 +20,5 @@ __all__ = [
     "PendulumPmpParameters",
     "PendulumPmpSampler",
     "PendulumSwingUpProblem",
+    "PendulumSwingUpDynamics",
 ]

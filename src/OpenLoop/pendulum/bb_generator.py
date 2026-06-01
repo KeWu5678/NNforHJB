@@ -9,9 +9,9 @@ from pathlib import Path
 from typing import Iterable
 
 import numpy as np
-from scipy.linalg import solve_continuous_are
 
 from src.OpenLoop.bvp_bb_optimizer import BvpBbOpenLoopOptimizer
+from src.OpenLoop.pendulum.swingup_dynamics import PendulumSwingUpDynamics
 
 
 PENDULUM_BB_DTYPE = np.dtype(
@@ -52,11 +52,19 @@ class PendulumBBDataGenerator:
         line_search_cost_tol: float = 0.0,
         alpha_max: float = 1.0,
     ) -> None:
-        self.mass = float(mass)
-        self.length = float(length)
-        self.damping = float(damping)
-        self.gravity = float(gravity)
-        self.state_weights = np.asarray(state_weights, dtype=float)
+        self.dynamics = PendulumSwingUpDynamics(
+            mass=mass,
+            length=length,
+            damping=damping,
+            gravity=gravity,
+            state_weights=state_weights,
+            control_weight=control_weight,
+        )
+        self.mass = self.dynamics.mass
+        self.length = self.dynamics.length
+        self.damping = self.dynamics.damping
+        self.gravity = self.dynamics.gravity
+        self.state_weights = self.dynamics.state_weights
         self.control_weight = float(control_weight)
         self.terminal_weight = float(terminal_weight)
         self.T_final = float(T_final)
@@ -70,22 +78,12 @@ class PendulumBBDataGenerator:
         self.x0_values: np.ndarray | None = None
 
         self._validate()
-        self.control_gain = 1.0 / (self.mass * self.length**2)
-        self.damping_gain = self.damping / (self.mass * self.length**2)
-        self.gravity_gain = self.gravity / self.length
-        self.local_lqr_matrix = self._compute_local_lqr_matrix()
+        self.control_gain = self.dynamics.control_gain
+        self.damping_gain = self.dynamics.damping_gain
+        self.gravity_gain = self.dynamics.gravity_gain
+        self.local_lqr_matrix = self.dynamics.local_lqr_matrix
 
     def _validate(self) -> None:
-        if self.mass <= 0.0:
-            raise ValueError("mass must be positive")
-        if self.length <= 0.0:
-            raise ValueError("length must be positive")
-        if self.state_weights.shape != (2,):
-            raise ValueError("state_weights must contain two values")
-        if np.any(self.state_weights < 0.0):
-            raise ValueError("state_weights must be nonnegative")
-        if self.control_weight <= 0.0:
-            raise ValueError("control_weight must be positive")
         if self.terminal_weight < 0.0:
             raise ValueError("terminal_weight must be nonnegative")
         if self.T_final <= 0.0:
@@ -97,17 +95,7 @@ class PendulumBBDataGenerator:
 
     @staticmethod
     def wrap_angle(theta: np.ndarray | float) -> np.ndarray:
-        return (np.asarray(theta) + np.pi) % (2.0 * np.pi) - np.pi
-
-    def _compute_local_lqr_matrix(self) -> np.ndarray:
-        a = np.array(
-            [[0.0, 1.0], [self.gravity_gain, -self.damping_gain]],
-            dtype=float,
-        )
-        b = np.array([[0.0], [self.control_gain]], dtype=float)
-        q = np.diag(self.state_weights)
-        r = np.array([[self.control_weight]], dtype=float)
-        return solve_continuous_are(a, b, q, r)
+        return PendulumSwingUpDynamics.wrap_angle(theta)
 
     def time_grid(self) -> np.ndarray:
         n_steps = int(np.ceil(self.T_final / self.dt))
@@ -124,39 +112,37 @@ class PendulumBBDataGenerator:
     def terminal_cost(self, terminal_state: np.ndarray) -> float:
         if self.terminal_weight == 0.0:
             return 0.0
-        diff = np.asarray(terminal_state, dtype=float).copy()
-        diff[0] = float(self.wrap_angle(diff[0]))
-        return float(self.terminal_weight * diff @ self.local_lqr_matrix @ diff)
+        return self.dynamics.local_lqr_value(
+            terminal_state,
+            weight=self.terminal_weight,
+        )
 
     def terminal_gradient(self, terminal_state: np.ndarray) -> np.ndarray:
         if self.terminal_weight == 0.0:
             return np.zeros(2, dtype=float)
-        diff = np.asarray(terminal_state, dtype=float).copy()
-        diff[0] = float(self.wrap_angle(diff[0]))
-        return 2.0 * self.terminal_weight * self.local_lqr_matrix @ diff
+        return self.dynamics.local_lqr_gradient(
+            terminal_state,
+            weight=self.terminal_weight,
+        )
 
     def pendulum_tpbvp(self, _t: np.ndarray, y: np.ndarray, u) -> np.ndarray:
-        theta = y[0, :]
-        omega = y[1, :]
-        p1 = y[2, :]
-        p2 = y[3, :]
-        q1, q2 = self.state_weights
+        state = y[:2, :].T
+        costate = y[2:4, :].T
         u_values = u(_t)
+        state_rhs = self.dynamics.forward_dynamics(state, u_values).T
+        costate_rhs = self.dynamics.costate_rhs(state, costate).T
         return np.vstack(
             [
-                omega,
-                -self.damping_gain * omega
-                + self.gravity_gain * np.sin(theta)
-                + self.control_gain * u_values,
-                -2.0 * q1 * np.sin(theta) - self.gravity_gain * np.cos(theta) * p2,
-                -2.0 * q2 * omega - p1 + self.damping_gain * p2,
+                state_rhs,
+                costate_rhs,
             ]
         )
 
     def gradient(self, u_values: np.ndarray, p2_values: np.ndarray) -> np.ndarray:
         if len(u_values) != len(p2_values):
             raise ValueError("u and p2 must have the same length")
-        return self.control_gain * p2_values + 2.0 * self.control_weight * u_values
+        costate = np.column_stack((np.zeros_like(p2_values), p2_values))
+        return self.dynamics.stationarity_residual(costate, u_values)
 
     def running_cost(
         self,
@@ -164,12 +150,8 @@ class PendulumBBDataGenerator:
         omega_values: np.ndarray,
         u_values: np.ndarray,
     ) -> np.ndarray:
-        q1, q2 = self.state_weights
-        return (
-            q1 * (2.0 - 2.0 * np.cos(theta_values))
-            + q2 * omega_values * omega_values
-            + self.control_weight * u_values * u_values
-        )
+        state = np.column_stack((theta_values, omega_values))
+        return self.dynamics.running_cost(state, u_values)
 
     def V(
         self,
@@ -200,7 +182,7 @@ class PendulumBBDataGenerator:
 
     def feedback_from_gradient(self, gradient: np.ndarray) -> float:
         gradient = np.asarray(gradient, dtype=float)
-        return float(-self.control_gain * gradient[1] / (2.0 * self.control_weight))
+        return float(self.dynamics.minimizing_control(gradient))
 
     def hjb_residual(
         self,
@@ -212,21 +194,13 @@ class PendulumBBDataGenerator:
         gradient = np.asarray(gradient, dtype=float)
         if control is None:
             control = self.feedback_from_gradient(gradient)
-        theta, omega = state
-        dynamics = np.array(
-            [
-                omega,
-                -self.damping_gain * omega
-                + self.gravity_gain * np.sin(theta)
-                + self.control_gain * control,
-            ]
-        )
+        state_rhs = self.dynamics.forward_dynamics(state, control)
         running = self.running_cost(
-            np.array([theta]),
-            np.array([omega]),
+            np.array([state[0]]),
+            np.array([state[1]]),
             np.array([control]),
         )[0]
-        return float(running + gradient @ dynamics)
+        return float(running + gradient @ state_rhs)
 
     def default_control_seeds(self) -> list[np.ndarray]:
         seeds = []

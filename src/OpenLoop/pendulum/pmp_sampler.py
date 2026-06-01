@@ -22,7 +22,8 @@ from typing import Callable, Iterable
 
 import numpy as np
 from scipy.integrate import solve_ivp
-from scipy.linalg import solve_continuous_are
+
+from src.OpenLoop.pendulum.swingup_dynamics import PendulumSwingUpDynamics
 
 
 PENDULUM_DATA_DTYPE = np.dtype(
@@ -84,11 +85,20 @@ class PendulumPmpSampler:
         self._validate_parameters()
 
         p = self.parameters
-        self.control_gain = 1.0 / (p.mass * p.length**2)
-        self.damping_gain = p.damping / (p.mass * p.length**2)
-        self.gravity_gain = p.gravity / p.length
-        self.state_weights = np.asarray(p.state_weights, dtype=float)
-        self.local_lqr_matrix = self._compute_local_lqr_matrix()
+        self.dynamics = PendulumSwingUpDynamics(
+            mass=p.mass,
+            length=p.length,
+            damping=p.damping,
+            gravity=p.gravity,
+            state_weights=p.state_weights,
+            control_weight=p.control_weight,
+            control_limit=p.control_limit,
+        )
+        self.control_gain = self.dynamics.control_gain
+        self.damping_gain = self.dynamics.damping_gain
+        self.gravity_gain = self.dynamics.gravity_gain
+        self.state_weights = self.dynamics.state_weights
+        self.local_lqr_matrix = self.dynamics.local_lqr_matrix
         self.local_lqr_eigvecs = np.linalg.eigh(self.local_lqr_matrix)[1]
 
     def _validate_parameters(self) -> None:
@@ -117,20 +127,6 @@ class PendulumPmpSampler:
         if np.any(state_weights < 0.0):
             raise ValueError("state_weights must be nonnegative")
 
-    def _compute_local_lqr_matrix(self) -> np.ndarray:
-        p = self.parameters
-        a = np.array(
-            [
-                [0.0, 1.0],
-                [self.gravity_gain, -self.damping_gain],
-            ],
-            dtype=float,
-        )
-        b = np.array([[0.0], [self.control_gain]], dtype=float)
-        q = np.diag(np.asarray(p.state_weights, dtype=float))
-        r = np.array([[p.control_weight]], dtype=float)
-        return solve_continuous_are(a, b, q, r)
-
     def boundary_state(self, angle: float, epsilon: float | None = None) -> np.ndarray:
         """Return one point on the local LQR level set e.T P e = epsilon."""
         eps = self.parameters.epsilon if epsilon is None else float(epsilon)
@@ -142,19 +138,13 @@ class PendulumPmpSampler:
         return scale * direction
 
     def boundary_costate(self, state: np.ndarray) -> np.ndarray:
-        state = np.asarray(state, dtype=float)
-        return 2.0 * self.local_lqr_matrix @ state
+        return self.dynamics.local_lqr_gradient(state)
 
     def local_lqr_value(self, state: np.ndarray) -> float:
-        state = np.asarray(state, dtype=float)
-        return float(state @ self.local_lqr_matrix @ state)
+        return self.dynamics.local_lqr_value(state)
 
     def minimizing_control(self, costate: np.ndarray) -> np.ndarray:
-        p2 = np.asarray(costate, dtype=float)[..., 1]
-        u = -self.control_gain * p2 / (2.0 * self.parameters.control_weight)
-        if self.parameters.control_limit is not None:
-            u = np.clip(u, -self.parameters.control_limit, self.parameters.control_limit)
-        return np.asarray(u, dtype=float)
+        return self.dynamics.minimizing_control(costate)
 
     def optimal_control(self, costate: np.ndarray) -> np.ndarray:
         """Return the HJB/PMP minimizing control for a value gradient."""
@@ -168,52 +158,16 @@ class PendulumPmpSampler:
         """Derivative of the unconstrained Hamiltonian with respect to control."""
         if control is None:
             control = self.minimizing_control(costate)
-        p2 = np.asarray(costate, dtype=float)[..., 1]
-        u = np.asarray(control, dtype=float)
-        return self.control_gain * p2 + 2.0 * self.parameters.control_weight * u
+        return self.dynamics.stationarity_residual(costate, control)
 
     def forward_dynamics(self, state: np.ndarray, control: np.ndarray | float) -> np.ndarray:
-        state = np.asarray(state, dtype=float)
-        theta = state[..., 0]
-        omega = state[..., 1]
-        u = np.asarray(control, dtype=float)
-        return np.stack(
-            [
-                omega,
-                -self.damping_gain * omega
-                + self.gravity_gain * np.sin(theta)
-                + self.control_gain * u,
-            ],
-            axis=-1,
-        )
+        return self.dynamics.forward_dynamics(state, control)
 
     def forward_costate_rhs(self, state: np.ndarray, costate: np.ndarray) -> np.ndarray:
-        state = np.asarray(state, dtype=float)
-        costate = np.asarray(costate, dtype=float)
-        theta = state[..., 0]
-        omega = state[..., 1]
-        p1 = costate[..., 0]
-        p2 = costate[..., 1]
-        q1, q2 = self.state_weights
-        return np.stack(
-            [
-                -2.0 * q1 * np.sin(theta) - self.gravity_gain * np.cos(theta) * p2,
-                -2.0 * q2 * omega - p1 + self.damping_gain * p2,
-            ],
-            axis=-1,
-        )
+        return self.dynamics.costate_rhs(state, costate)
 
     def running_cost(self, state: np.ndarray, control: np.ndarray | float) -> np.ndarray:
-        state = np.asarray(state, dtype=float)
-        theta = state[..., 0]
-        omega = state[..., 1]
-        u = np.asarray(control, dtype=float)
-        q1, q2 = self.state_weights
-        return (
-            q1 * (2.0 - 2.0 * np.cos(theta))
-            + q2 * omega * omega
-            + self.parameters.control_weight * u * u
-        )
+        return self.dynamics.running_cost(state, control)
 
     def trajectory_cost(
         self,

@@ -1,6 +1,47 @@
 import numpy as np
 
+from src.OpenLoop.pendulum.swingup_dynamics import PendulumSwingUpDynamics
 from src.OpenLoop.pendulum.pmp_sampler import PendulumPmpParameters, PendulumPmpSampler
+
+
+def test_swingup_dynamics_evaluates_shared_hamiltonian_equations() -> None:
+    dynamics = PendulumSwingUpDynamics(control_weight=0.7)
+    state = np.array([0.4, -0.7])
+    costate = np.array([1.2, -0.5])
+    control = 0.6
+    q1, q2 = dynamics.state_weights
+
+    expected_state_rhs = np.array(
+        [
+            state[1],
+            -dynamics.damping_gain * state[1]
+            + dynamics.gravity_gain * np.sin(state[0])
+            + dynamics.control_gain * control,
+        ]
+    )
+    expected_costate_rhs = np.array(
+        [
+            -2.0 * q1 * np.sin(state[0])
+            - dynamics.gravity_gain * np.cos(state[0]) * costate[1],
+            -2.0 * q2 * state[1] - costate[0] + dynamics.damping_gain * costate[1],
+        ]
+    )
+    expected_running_cost = (
+        q1 * (2.0 - 2.0 * np.cos(state[0]))
+        + q2 * state[1] ** 2
+        + dynamics.control_weight * control**2
+    )
+    expected_stationarity = (
+        dynamics.control_gain * costate[1] + 2.0 * dynamics.control_weight * control
+    )
+
+    assert np.allclose(dynamics.forward_dynamics(state, control), expected_state_rhs)
+    assert np.allclose(dynamics.costate_rhs(state, costate), expected_costate_rhs)
+    assert np.isclose(dynamics.running_cost(state, control), expected_running_cost)
+    assert np.isclose(
+        dynamics.stationarity_residual(costate, control),
+        expected_stationarity,
+    )
 
 
 def test_boundary_state_has_requested_lqr_value() -> None:
