@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import random
 import sys
 import time
@@ -23,7 +24,10 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from src.PDAP import from_alias
 from src.activations import matern52
-from src.experiment_logging import ExperimentRun
+from src.experiment_logging import RunRecordWriter
+from src.logging_config import configure_logging
+
+logger = logging.getLogger(__name__)
 
 
 def swish_beta(beta: float):
@@ -329,15 +333,21 @@ NUM_INSERTION = 50
 PRUNING_THRESHOLD = 1e-5
 DATA_PATH = REPO_ROOT / "rawdata/raw_data/data/VDP_beta_0.1_grid_30x30.npy"
 
-
-def write_activation_run_record(output_dir: Path, summary: dict) -> Path:
-    run = ExperimentRun(
-        output_dir,
-        name="activation_search",
-        run_id=f"{summary['activation']}_seed{summary['seed']}",
-        config={"activation": summary["activation"], "seed": summary["seed"]},
-    )
-    return run.finish(summary=summary)
+RUN_RECORD = RunRecordWriter(
+    REPO_ROOT,
+    name="activation_search",
+    id_fields=("activation", "seed"),
+    config_fields=(
+        "activation",
+        "seed",
+        "num_iterations",
+        "num_insertion",
+        "power",
+        "loss",
+        "use_sphere",
+    ),
+    metric_field="per_gamma",
+)
 
 
 def set_seed(seed: int) -> None:
@@ -359,6 +369,7 @@ def load_data() -> dict:
 
 
 def main() -> int:
+    configure_logging()
     p = argparse.ArgumentParser()
     p.add_argument("--activation", required=True, choices=sorted(ACTIVATIONS))
     p.add_argument("--seed", type=int, required=True)
@@ -369,19 +380,6 @@ def main() -> int:
 
     activation_fn, use_sphere = ACTIVATIONS[args.activation]
     data = load_data()
-    run = None
-    if args.output_dir is not None:
-        run = ExperimentRun(
-            args.output_dir,
-            name="activation_search",
-            run_id=f"{args.activation}_seed{args.seed}",
-            config={
-                "activation": args.activation,
-                "seed": args.seed,
-                "num_iterations": args.num_iterations,
-                "num_insertion": args.num_insertion,
-            },
-        )
 
     per_gamma = []
     t0 = time.time()
@@ -411,6 +409,8 @@ def main() -> int:
     out = {
         "activation": args.activation,
         "seed":       args.seed,
+        "num_iterations": args.num_iterations,
+        "num_insertion": args.num_insertion,
         "power":      POWER,
         "loss":       LOSS_WEIGHTS,
         "use_sphere": use_sphere,
@@ -421,9 +421,9 @@ def main() -> int:
         "best_h1":    best["h1"],
         "best_n":     best["n"],
     }
-    if run is not None:
-        path = run.finish(summary=out)
-        print(f"saved run record: {path}", file=sys.stderr, flush=True)
+    if args.output_dir is not None:
+        path = RUN_RECORD.write(out, output_dir=args.output_dir)
+        logger.info("saved run record: path=%s", path)
     print(json.dumps(out))
     return 0
 

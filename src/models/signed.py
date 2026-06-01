@@ -68,7 +68,7 @@ class SignedModel:
         self.loss_history = {'train_loss': [], 'val_loss': [], 'value_loss': [], 'grad_loss': []}
         self.config = None
         
-        # Log initialization (logger should be configured at application level via setup_logging())
+        # Log initialization (logger should be configured at application level via configure_logging())
         if self.verbose:
             logger.info("Model initialized")
     

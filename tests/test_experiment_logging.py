@@ -3,7 +3,7 @@ import logging
 import importlib.util
 from pathlib import Path
 
-from src.experiment_logging import ExperimentRun
+from src.experiment_logging import ExperimentRun, RunRecordWriter
 from src.logging_config import configure_logging
 
 
@@ -94,49 +94,56 @@ def test_experiment_run_preserves_runner_summary_fields(tmp_path):
     assert record["name"] == "activation_search"
 
 
-def test_activation_runner_writes_own_run_record(tmp_path):
-    script = load_script_module("run_activation_experiment", "scripts/run_activation_experiment.py")
-    summary = {
-        "activation": "relu",
-        "seed": 42,
-        "best_score": 18.3,
-        "best_h1": 0.12,
-        "best_n": 78,
-    }
-
-    path = script.write_activation_run_record(tmp_path, summary)
-
-    record = json.loads(path.read_text(encoding="utf-8"))
-    assert path == tmp_path / "relu_seed42.json"
-    assert record["activation"] == "relu"
-    assert record["seed"] == 42
-    assert record["best_score"] == 18.3
-    assert record["status"] == "completed"
-    assert record["name"] == "activation_search"
-
-
-def test_discontinuous_activation_runner_writes_own_run_record(tmp_path):
-    script = load_script_module(
-        "run_discontinuous_activation_experiment",
-        "scripts/run_discontinuous_activation_experiment.py",
+def test_run_record_writer_derives_identity_config_and_metrics(tmp_path):
+    writer = RunRecordWriter(
+        tmp_path,
+        name="activation_search",
+        id_fields=("activation", "seed"),
+        config_fields=("activation", "seed", "num_iterations"),
+        metric_field="per_gamma",
     )
     summary = {
         "activation": "relu",
         "seed": 42,
-        "best_score": 5.0,
-        "best_eval_h1": 0.05,
-        "best_n": 100,
+        "num_iterations": 10,
+        "best_score": 18.3,
+        "per_gamma": [{"gamma": 0.1, "h1": 0.12, "n": 78}],
     }
 
-    path = script.write_discontinuous_activation_run_record(tmp_path, summary)
+    path = writer.write(summary)
 
     record = json.loads(path.read_text(encoding="utf-8"))
     assert path == tmp_path / "relu_seed42.json"
-    assert record["activation"] == "relu"
-    assert record["seed"] == 42
-    assert record["best_score"] == 5.0
-    assert record["status"] == "completed"
-    assert record["name"] == "activation_search_analytical"
+    assert record["run_id"] == "relu_seed42"
+    assert record["best_score"] == 18.3
+    assert record["config"] == {"activation": "relu", "seed": 42, "num_iterations": 10}
+    assert record["metrics"] == [{"step": 0.1, "values": {"gamma": 0.1, "h1": 0.12, "n": 78}}]
+    assert record["name"] == "activation_search"
+
+
+def test_run_record_writer_preserves_runner_elapsed_time(tmp_path):
+    writer = RunRecordWriter(
+        tmp_path,
+        name="activation_search",
+        id_fields=("activation", "seed"),
+        config_fields=("activation", "seed"),
+    )
+
+    path = writer.write({"activation": "relu", "seed": 42, "elapsed_s": 12.34})
+
+    record = json.loads(path.read_text(encoding="utf-8"))
+    assert record["elapsed_s"] == 12.34
+
+
+def test_activation_runners_use_shared_run_record_writer():
+    activation_script = load_script_module("run_activation_experiment", "scripts/run_activation_experiment.py")
+    analytical_script = load_script_module(
+        "run_discontinuous_activation_experiment", "scripts/run_discontinuous_activation_experiment.py",
+    )
+    assert activation_script.RUN_RECORD.name == "activation_search"
+    assert activation_script.RUN_RECORD.run_id({"activation": "relu", "seed": 42}) == "relu_seed42"
+    assert analytical_script.RUN_RECORD.name == "activation_search_analytical"
+    assert analytical_script.RUN_RECORD.run_id({"activation": "relu", "seed": 42}) == "relu_seed42"
 
 
 def test_pendulum_model_comparison_writes_standard_run_record(tmp_path):

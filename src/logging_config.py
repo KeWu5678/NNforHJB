@@ -39,20 +39,5 @@ def configure_logging(
     return logging.getLogger("nnforhjb")
 
 
-def setup_logging(
-    verbose: bool = True,
-    log_file: str | Path | None = None,
-    log_level: int | str = logging.INFO,
-    rotation: str | None = None,
-) -> logging.Logger:
-    """Backward-compatible alias for older callers.
-
-    ``rotation`` is accepted for old Loguru-style calls but is not used by the
-    standard-library implementation.
-    """
-    del rotation
-    return configure_logging(verbose=verbose, log_file=log_file, level=log_level)
-
-
 def get_logger(name: str = "nnforhjb") -> logging.Logger:
     return logging.getLogger(name)

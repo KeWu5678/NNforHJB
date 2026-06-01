@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import random
 import sys
 import time
@@ -24,8 +25,11 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.run_activation_experiment import ACTIVATIONS as BASE_ACTIVATIONS  # noqa: E402
 from src.PDAP import from_alias  # noqa: E402
-from src.experiment_logging import ExperimentRun  # noqa: E402
+from src.experiment_logging import RunRecordWriter  # noqa: E402
+from src.logging_config import configure_logging  # noqa: E402
 from src.net import ShallowNetwork  # noqa: E402
+
+logger = logging.getLogger(__name__)
 
 GAMMAS = [0, 1e-2, 1e-1, 1, 10]
 ALPHA = 1e-5
@@ -44,15 +48,24 @@ def gaussian_notebook(z: torch.Tensor) -> torch.Tensor:
 ACTIVATIONS = dict(BASE_ACTIVATIONS)
 ACTIVATIONS["gaussian"] = (gaussian_notebook, False)
 
-
-def write_discontinuous_activation_run_record(output_dir: Path, summary: dict[str, Any]) -> Path:
-    run = ExperimentRun(
-        output_dir,
-        name="activation_search_analytical",
-        run_id=f"{summary['activation']}_seed{summary['seed']}",
-        config={"activation": summary["activation"], "seed": summary["seed"]},
-    )
-    return run.finish(summary=summary)
+RUN_RECORD = RunRecordWriter(
+    REPO_ROOT,
+    name="activation_search_analytical",
+    id_fields=("activation", "seed"),
+    config_fields=(
+        "activation",
+        "seed",
+        "num_iterations",
+        "num_insertion",
+        "train_grid_size",
+        "eval_grid_size",
+        "c_jump",
+        "power",
+        "loss",
+        "use_sphere",
+    ),
+    metric_field="per_gamma",
+)
 
 
 def set_seed(seed: int) -> None:
@@ -166,6 +179,7 @@ def evaluate_network(
 
 
 def main() -> int:
+    configure_logging()
     parser = argparse.ArgumentParser()
     parser.add_argument("--activation", required=True, choices=sorted(ACTIVATIONS))
     parser.add_argument("--seed", type=int, required=True)
@@ -180,22 +194,6 @@ def main() -> int:
     activation_fn, use_sphere = ACTIVATIONS[args.activation]
     train_data, _ = make_grid(args.train_grid_size, c_jump=args.c_jump)
     eval_data, eval_dist = make_grid(args.eval_grid_size, c_jump=args.c_jump)
-    run = None
-    if args.output_dir is not None:
-        run = ExperimentRun(
-            args.output_dir,
-            name="activation_search_analytical",
-            run_id=f"{args.activation}_seed{args.seed}",
-            config={
-                "activation": args.activation,
-                "seed": args.seed,
-                "num_iterations": args.num_iterations,
-                "num_insertion": args.num_insertion,
-                "train_grid_size": args.train_grid_size,
-                "eval_grid_size": args.eval_grid_size,
-                "c_jump": args.c_jump,
-            },
-        )
 
     per_gamma = []
     start = time.time()
@@ -241,6 +239,8 @@ def main() -> int:
     out = {
         "activation": args.activation,
         "seed": args.seed,
+        "num_iterations": args.num_iterations,
+        "num_insertion": args.num_insertion,
         "power": POWER,
         "loss": LOSS_WEIGHTS,
         "use_sphere": use_sphere,
@@ -261,9 +261,9 @@ def main() -> int:
         "best_val_h1": best["val_h1"],
         "best_n": best["n"],
     }
-    if run is not None:
-        path = run.finish(summary=out)
-        print(f"saved run record: {path}", file=sys.stderr, flush=True)
+    if args.output_dir is not None:
+        path = RUN_RECORD.write(out, output_dir=args.output_dir)
+        logger.info("saved run record: path=%s", path)
     print(json.dumps(out))
     return 0
 
