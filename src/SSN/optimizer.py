@@ -60,7 +60,7 @@ class SSN(Optimizer):
         cleaner to pass through the closure, but callers (models/signed.py,
         models/semiconcave.py) currently poke it as an attribute.
     """
-    
+
     def __init__(
         self,
         params: Iterable[Tensor],

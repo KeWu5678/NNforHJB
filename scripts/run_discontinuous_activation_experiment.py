@@ -4,7 +4,7 @@
 The training data matches Experiment 3 in notebook/pdpa_vdp.ipynb. Each gamma is
 trained with PDPA_v2, then the selected network is evaluated against the exact
 analytic value and gradient on a dense grid. The printed JSON line is consumed
-by activation_search/discontinuous_gradient/aggregate.py.
+by autoresearch/ActivationSearch/data:analytical/scripts/aggregate.py.
 """
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.run_activation_experiment import ACTIVATIONS as BASE_ACTIVATIONS  # noqa: E402
-from src.PDPA_v2 import PDPA_v2  # noqa: E402
+from src.PDAP import from_alias  # noqa: E402
 from src.net import ShallowNetwork  # noqa: E402
 
 GAMMAS = [0, 1e-2, 1e-1, 1, 10]
@@ -173,7 +173,8 @@ def main() -> int:
     start = time.time()
     for gamma in GAMMAS:
         set_seed(args.seed)
-        pdpa = PDPA_v2(
+        pdpa = from_alias(
+            "v2",
             data=train_data,
             alpha=ALPHA,
             gamma=gamma,
@@ -183,7 +184,7 @@ def main() -> int:
             loss_weights=LOSS_WEIGHTS,
             verbose=False,
         )
-        result = pdpa.retrain(
+        result = pdpa.fit(
             num_iterations=args.num_iterations,
             num_insertion=args.num_insertion,
             threshold=PRUNING_THRESHOLD,
