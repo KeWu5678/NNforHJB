@@ -24,14 +24,15 @@ so the result is not tied to the one-point validation split inside `PDPA_v2`.
 ## Layout
 
 ```text
-activation_search/discontinuous_gradient/
+autoresearch/ActivationSearch/data:analytical/
   README.md
   SUMMARY.md
   program.md
-  aggregate.py
-  plot_pareto.py
-  rank_discontinuity.py
-  plot_near.py
+  scripts/
+    aggregate.py
+    plot_pareto.py
+    rank_discontinuity.py
+    plot_near.py
   results.tsv    # generated, ignored
   results_near.tsv # generated, ignored
   near_pareto.png  # generated, ignored
@@ -43,7 +44,7 @@ scripts/
 ## Smoke Test
 
 ```bash
-mkdir -p activation_search/discontinuous_gradient/runs
+mkdir -p autoresearch/ActivationSearch/data:analytical/runs
 
 uv run python scripts/run_discontinuous_activation_experiment.py \
   --activation softplus_b0_25 --seed 42 \
@@ -53,7 +54,7 @@ uv run python scripts/run_discontinuous_activation_experiment.py \
 If `uv` is unavailable in the shell, use:
 
 ```bash
-mkdir -p activation_search/discontinuous_gradient/runs
+mkdir -p autoresearch/ActivationSearch/data:analytical/runs
 
 .venv/bin/python scripts/run_discontinuous_activation_experiment.py \
   --activation softplus_b0_25 --seed 42 \
@@ -72,8 +73,8 @@ The JSON also reports gradient error near and far from the discontinuity.
 For Experiment 3, the primary analysis is the discontinuity-focused view:
 
 ```bash
-.venv/bin/python activation_search/discontinuous_gradient/rank_discontinuity.py
-.venv/bin/python activation_search/discontinuous_gradient/plot_near.py
+.venv/bin/python autoresearch/ActivationSearch/data:analytical/scripts/rank_discontinuity.py
+.venv/bin/python autoresearch/ActivationSearch/data:analytical/scripts/plot_near.py
 ```
 
 This writes `results_near.tsv` and `near_pareto.png`, selecting each seed/gamma

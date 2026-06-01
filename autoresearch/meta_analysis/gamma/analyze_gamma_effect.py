@@ -8,12 +8,12 @@ import statistics
 from collections import defaultdict
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[2]
 
 EXPERIMENTS = {
     "vdp_hjb": {
-        "runs": ROOT / "vdp_hjb_summary" / "runs",
-        "out": ROOT / "vdp_hjb_summary" / "analysis" / "gamma_effect.tsv",
+        "runs": ROOT / "ActivationSearch" / "data:VDP" / "runs",
+        "out": ROOT / "ActivationSearch" / "data:VDP" / "analysis" / "gamma_effect.tsv",
         "metrics": {
             "h1": lambda row: float(row["h1"]),
             "neurons": lambda row: float(row["n"]),
@@ -21,8 +21,8 @@ EXPERIMENTS = {
         },
     },
     "discontinuous_gradient": {
-        "runs": ROOT / "discontinuous_gradient" / "runs",
-        "out": ROOT / "discontinuous_gradient" / "gamma_effect.tsv",
+        "runs": ROOT / "ActivationSearch" / "data:analytical" / "runs",
+        "out": ROOT / "ActivationSearch" / "data:analytical" / "gamma_effect.tsv",
         "metrics": {
             "near_grad": lambda row: float(row["near_grad"]),
             "far_grad": lambda row: float(row["far_grad"]),
@@ -109,7 +109,7 @@ def analyze_experiment(name: str, config: dict) -> list[dict]:
 
 
 def write_summary(all_rows: list[dict]) -> None:
-    summary = ROOT / "gamma_effect_summary.md"
+    summary = ROOT / "meta_analysis" / "gamma" / "gamma_effect_summary.md"
     lines = [
         "# Gamma Effect Summary",
         "",

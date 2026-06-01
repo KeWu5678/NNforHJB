@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def parse_gamma_values(text: str) -> list[float]:
@@ -175,8 +175,8 @@ def write_section(
 
 
 def main() -> int:
-    vdp_rows = experiment_rows(ROOT / "vdp_hjb_summary" / "analysis" / "gamma_effect.tsv", "h1", "score")
-    disc_rows = experiment_rows(ROOT / "discontinuous_gradient" / "gamma_effect.tsv", "near_grad", "near_score")
+    vdp_rows = experiment_rows(ROOT / "ActivationSearch" / "data:VDP" / "analysis" / "gamma_effect.tsv", "h1", "score")
+    disc_rows = experiment_rows(ROOT / "ActivationSearch" / "data:analytical" / "gamma_effect.tsv", "near_grad", "near_score")
 
     lines = [
         "# Gamma Pattern Check",
@@ -191,7 +191,7 @@ def main() -> int:
     ]
     write_section(lines, "VDP HJB", vdp_rows)
     write_section(lines, "Discontinuous Gradient", disc_rows)
-    (ROOT / "gamma_pattern_check.md").write_text("\n".join(lines))
+    (ROOT / "meta_analysis" / "gamma" / "gamma_pattern_check.md").write_text("\n".join(lines))
     return 0
 
 
