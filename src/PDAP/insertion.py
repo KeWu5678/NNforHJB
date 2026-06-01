@@ -20,11 +20,13 @@ configuration.
 
 from __future__ import annotations
 
+import logging
 from typing import Callable, List, Optional, Tuple
 
 import numpy as np
 import torch
-from loguru import logger
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["profile_threshold", "finite_step", "solve_insertion_weight"]
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import random
 import sys
 import time
@@ -24,7 +25,11 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.run_activation_experiment import ACTIVATIONS as BASE_ACTIVATIONS  # noqa: E402
 from src.PDAP import from_alias  # noqa: E402
+from src.experiment_logging import RunRecordWriter  # noqa: E402
+from src.logging_config import configure_logging  # noqa: E402
 from src.net import ShallowNetwork  # noqa: E402
+
+logger = logging.getLogger(__name__)
 
 GAMMAS = [0, 1e-2, 1e-1, 1, 10]
 ALPHA = 1e-5
@@ -42,6 +47,26 @@ def gaussian_notebook(z: torch.Tensor) -> torch.Tensor:
 
 ACTIVATIONS = dict(BASE_ACTIVATIONS)
 ACTIVATIONS["gaussian"] = (gaussian_notebook, False)
+
+RUN_RECORD = RunRecordWriter(
+    REPO_ROOT,
+    name="activation_search_analytical",
+    id_fields=("activation", "seed"),
+    config_fields=(
+        "activation",
+        "seed",
+        "num_iterations",
+        "num_insertion",
+        "train_grid_size",
+        "eval_grid_size",
+        "c_jump",
+        "power",
+        "loss",
+        "use_sphere",
+    ),
+    metric_field="per_gamma",
+    metric_step_field="gamma",
+)
 
 
 def set_seed(seed: int) -> None:
@@ -155,6 +180,7 @@ def evaluate_network(
 
 
 def main() -> int:
+    configure_logging()
     parser = argparse.ArgumentParser()
     parser.add_argument("--activation", required=True, choices=sorted(ACTIVATIONS))
     parser.add_argument("--seed", type=int, required=True)
@@ -163,6 +189,7 @@ def main() -> int:
     parser.add_argument("--train-grid-size", type=int, default=30)
     parser.add_argument("--eval-grid-size", type=int, default=61)
     parser.add_argument("--c-jump", type=float, default=C_JUMP)
+    parser.add_argument("--output-dir", type=Path, default=None)
     args = parser.parse_args()
 
     activation_fn, use_sphere = ACTIVATIONS[args.activation]
@@ -213,6 +240,8 @@ def main() -> int:
     out = {
         "activation": args.activation,
         "seed": args.seed,
+        "num_iterations": args.num_iterations,
+        "num_insertion": args.num_insertion,
         "power": POWER,
         "loss": LOSS_WEIGHTS,
         "use_sphere": use_sphere,
@@ -233,6 +262,9 @@ def main() -> int:
         "best_val_h1": best["val_h1"],
         "best_n": best["n"],
     }
+    if args.output_dir is not None:
+        path = RUN_RECORD.write(out, output_dir=args.output_dir)
+        logger.info("saved run record: path=%s", path)
     print(json.dumps(out))
     return 0
 

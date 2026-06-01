@@ -5,13 +5,15 @@ Modular plotting functions for VDP value function visualization
 """
 
 import os
+import logging
 import numpy as np
 import pickle
 import matplotlib.pyplot as plt
 from matplotlib import cm
 import torch
-from loguru import logger
 from .pickle_compat import load as pickle_load
+
+logger = logging.getLogger(__name__)
 
 def load_training_history(history_file):
     """

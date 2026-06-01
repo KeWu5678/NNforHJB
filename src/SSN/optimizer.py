@@ -1,13 +1,15 @@
+import logging
 from typing import Callable, Iterable, Optional
 
 import torch
 from torch import Tensor
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.optim import Optimizer
-from loguru import logger
 from .prox import _compute_prox, _compute_dprox
 from .penalty import _penalty_grad, _nonconvex_correction, _nonconvex_correction_dd
 from .strategies import solve_levenberg_marquardt, solve_steihaug_cg
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["SSN"]
 

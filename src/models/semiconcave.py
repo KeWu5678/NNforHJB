@@ -16,14 +16,16 @@ pure-network ``src.model.model`` (which sets ``optimizer.data_hessian``).
 
 from __future__ import annotations
 
+import logging
 from typing import Callable, Tuple
 
 import numpy as np
 import torch
-from loguru import logger
 
 from ..SSN import SSN
 from ..utils import _phi, _phi_prox
+
+logger = logging.getLogger(__name__)
 
 
 TensorLike = torch.Tensor | np.ndarray

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import random
 import sys
 import time
@@ -23,6 +24,10 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from src.PDAP import from_alias
 from src.activations import matern52
+from src.experiment_logging import RunRecordWriter
+from src.logging_config import configure_logging
+
+logger = logging.getLogger(__name__)
 
 
 def swish_beta(beta: float):
@@ -328,6 +333,23 @@ NUM_INSERTION = 50
 PRUNING_THRESHOLD = 1e-5
 DATA_PATH = REPO_ROOT / "rawdata/raw_data/data/VDP_beta_0.1_grid_30x30.npy"
 
+RUN_RECORD = RunRecordWriter(
+    REPO_ROOT,
+    name="activation_search",
+    id_fields=("activation", "seed"),
+    config_fields=(
+        "activation",
+        "seed",
+        "num_iterations",
+        "num_insertion",
+        "power",
+        "loss",
+        "use_sphere",
+    ),
+    metric_field="per_gamma",
+    metric_step_field="gamma",
+)
+
 
 def set_seed(seed: int) -> None:
     random.seed(seed)
@@ -348,11 +370,13 @@ def load_data() -> dict:
 
 
 def main() -> int:
+    configure_logging()
     p = argparse.ArgumentParser()
     p.add_argument("--activation", required=True, choices=sorted(ACTIVATIONS))
     p.add_argument("--seed", type=int, required=True)
     p.add_argument("--num-iterations", type=int, default=NUM_ITERATIONS)
     p.add_argument("--num-insertion",  type=int, default=NUM_INSERTION)
+    p.add_argument("--output-dir", type=Path, default=None)
     args = p.parse_args()
 
     activation_fn, use_sphere = ACTIVATIONS[args.activation]
@@ -386,6 +410,8 @@ def main() -> int:
     out = {
         "activation": args.activation,
         "seed":       args.seed,
+        "num_iterations": args.num_iterations,
+        "num_insertion": args.num_insertion,
         "power":      POWER,
         "loss":       LOSS_WEIGHTS,
         "use_sphere": use_sphere,
@@ -396,6 +422,9 @@ def main() -> int:
         "best_h1":    best["h1"],
         "best_n":     best["n"],
     }
+    if args.output_dir is not None:
+        path = RUN_RECORD.write(out, output_dir=args.output_dir)
+        logger.info("saved run record: path=%s", path)
     print(json.dumps(out))
     return 0
 

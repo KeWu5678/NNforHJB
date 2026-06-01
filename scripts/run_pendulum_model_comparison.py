@@ -34,6 +34,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import logging
 import sys
 import time
 from pathlib import Path
@@ -49,7 +50,11 @@ if str(REPO_ROOT) not in sys.path:
 
 from scripts.run_discontinuous_activation_experiment import ACTIVATIONS, set_seed  # noqa: E402
 from src.PDAP import from_alias  # noqa: E402
+from src.experiment_logging import RunRecordWriter  # noqa: E402
+from src.logging_config import configure_logging  # noqa: E402
 from src.net import ShallowNetwork  # noqa: E402
+
+logger = logging.getLogger(__name__)
 
 
 def relative_norm(error: np.ndarray, reference: np.ndarray) -> float:
@@ -105,6 +110,23 @@ DATASETS = {
 # Whether the stationary-HJB residual is meaningful (infinite-horizon) or just
 # diagnostic (finite-horizon).
 HJB_IS_STATIONARY = {"pmp": True, "transient": False}
+RUN_RECORD = RunRecordWriter(
+    DEFAULT_OUTPUT_DIR,
+    name="pendulum_model_comparison",
+    id_fields=("model", "activation", "seed"),
+    config_fields=(
+        "model",
+        "dataset",
+        "activation",
+        "seed",
+        "num_iterations",
+        "num_insertion",
+        "power",
+        "alpha",
+    ),
+    metric_field="per_gamma",
+    metric_step_field="gamma",
+)
 
 
 def parse_float_list(text: str) -> list[float]:
@@ -399,8 +421,7 @@ def run_model(model_name, seed, ctx, args) -> dict[str, Any]:
 
 def write_outputs(output_dir: Path, run: dict[str, Any]) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
-    run_path = output_dir / f"{run['model']}_{run['activation']}_seed{run['seed']}.json"
-    run_path.write_text(json.dumps(run, indent=2, default=str) + "\n", encoding="utf-8")
+    RUN_RECORD.write(run, output_dir=output_dir)
 
 
 def write_summary(output_dir: Path, runs: list[dict[str, Any]]) -> None:
@@ -492,6 +513,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    configure_logging()
     args = parse_args()
     args.activation_name = args.activation
     args.activation_fn, args.use_sphere = ACTIVATIONS[args.activation]
@@ -502,9 +524,10 @@ def main() -> int:
     for dataset_name in args.datasets:
         args.dataset_name = dataset_name
         ctx = build_context(dataset_name, args)
-        print(f"[{dataset_name}] train={ctx['n_train']} eval={ctx['n_eval']} "
-              f"s_x={ctx['scales']['s_x']} s_v={ctx['scales']['s_v']:.4g}",
-              file=sys.stderr, flush=True)
+        logger.info(
+            "dataset ready: dataset=%s train=%s eval=%s s_x=%s s_v=%.4g",
+            dataset_name, ctx["n_train"], ctx["n_eval"], ctx["scales"]["s_x"], ctx["scales"]["s_v"],
+        )
         out_dir = args.output_dir / dataset_name
         for seed in args.seeds_list:
             for model_name in args.models:
@@ -521,7 +544,7 @@ def main() -> int:
                                  f" neurons={run['best_neurons']}"
                                  f" gamma={run['best_gamma']}"
                                  f" hjb_mean={run['best_hjb_mean']:.3e}")
-                print(progress, file=sys.stderr, flush=True)
+                logger.info(progress)
                 if not args.no_save:
                     write_outputs(out_dir, run)
         if not args.no_save:
