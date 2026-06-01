@@ -125,6 +125,7 @@ RUN_RECORD = RunRecordWriter(
         "alpha",
     ),
     metric_field="per_gamma",
+    metric_step_field="gamma",
 )
 
 

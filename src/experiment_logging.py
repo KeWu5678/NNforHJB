@@ -91,6 +91,7 @@ class RunRecordWriter:
     id_fields: tuple[str, ...]
     config_fields: tuple[str, ...]
     metric_field: str | None = None
+    metric_step_field: str | None = None
 
     def run_id(self, summary: dict[str, Any]) -> str:
         parts = []
@@ -117,5 +118,6 @@ class RunRecordWriter:
         )
         if self.metric_field is not None:
             for row in summary.get(self.metric_field, []):
-                run.log_metrics(row, step=row.get("gamma"))
+                step = row.get(self.metric_step_field) if self.metric_step_field is not None else None
+                run.log_metrics(row, step=step)
         return run.finish(status=status or summary.get("status", "completed"), summary=summary)

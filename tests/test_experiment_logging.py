@@ -101,6 +101,7 @@ def test_run_record_writer_derives_identity_config_and_metrics(tmp_path):
         id_fields=("activation", "seed"),
         config_fields=("activation", "seed", "num_iterations"),
         metric_field="per_gamma",
+        metric_step_field="gamma",
     )
     summary = {
         "activation": "relu",
@@ -119,6 +120,28 @@ def test_run_record_writer_derives_identity_config_and_metrics(tmp_path):
     assert record["config"] == {"activation": "relu", "seed": 42, "num_iterations": 10}
     assert record["metrics"] == [{"step": 0.1, "values": {"gamma": 0.1, "h1": 0.12, "n": 78}}]
     assert record["name"] == "activation_search"
+
+
+def test_run_record_writer_does_not_assume_gamma_metric_steps(tmp_path):
+    writer = RunRecordWriter(
+        tmp_path,
+        name="training_curve",
+        id_fields=("model", "seed"),
+        config_fields=("model", "seed"),
+        metric_field="per_epoch",
+        metric_step_field="epoch",
+    )
+    summary = {
+        "model": "pdpa",
+        "seed": 42,
+        "per_epoch": [{"epoch": 3, "train_loss": 0.2, "val_loss": 0.25}],
+    }
+
+    path = writer.write(summary)
+
+    record = json.loads(path.read_text(encoding="utf-8"))
+    assert record["run_id"] == "pdpa_seed42"
+    assert record["metrics"] == [{"step": 3, "values": {"epoch": 3, "train_loss": 0.2, "val_loss": 0.25}}]
 
 
 def test_run_record_writer_preserves_runner_elapsed_time(tmp_path):

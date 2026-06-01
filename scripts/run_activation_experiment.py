@@ -347,6 +347,7 @@ RUN_RECORD = RunRecordWriter(
         "use_sphere",
     ),
     metric_field="per_gamma",
+    metric_step_field="gamma",
 )
 
 
