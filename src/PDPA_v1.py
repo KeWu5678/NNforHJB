@@ -96,7 +96,10 @@ class PDPA_v1(PDPA_v2):
             pre = Xc @ a.reshape(-1) + b.reshape(())
             act = self.activation_fn(pre).reshape(-1, 1)
             nv = act ** p
-            ndv = torch.autograd.grad(nv.sum(), Xc, create_graph=False, retain_graph=False)[0]
+            # create_graph=True is required: the profile objective contains ndv
+            # (the neuron's input-gradient) and the L-BFGS closure backprops the
+            # objective w.r.t. the sphere params, differentiating through ndv.
+            ndv = torch.autograd.grad(nv.sum(), Xc, create_graph=True, retain_graph=True)[0]
             val = (nv * res_value).sum() / Nx
             grad = (ndv * res_grad).sum() / Nx
             return w1 * val + w2 * grad  # signed (one-sided)
