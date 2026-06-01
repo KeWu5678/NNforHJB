@@ -1,11 +1,11 @@
-import os
 from datetime import datetime
+from pathlib import Path
 import numpy as np
 from src import utils
-from src import openloop_optimizer as op
+from src.OpenLoop.bvp_bb_optimizer import BvpBbOpenLoopOptimizer
 
 
-class DateGenerator:
+class DataGenerator:
     """Generator for controlled VDP data and saving to disk."""
 
     def __init__(
@@ -14,17 +14,12 @@ class DateGenerator:
         dt: float = 1e-4,
         T_final: float = 3.0,
     ) -> None:
-        # Parameters
         self.beta = beta
         self.dt = dt
         self.T_final = T_final
-
-    
-
-        # State grid and dataset
         self.x0_values = None
 
-    """=====================THE ODE======================"""
+    # --- ODE ---
 
     def VDP(self, t, y, u):
         """Define the Boundary value problem with control parameter u"""
@@ -39,11 +34,7 @@ class DateGenerator:
         """Gradient of the objective with respect to the control."""
         if len(p) != len(u):
             raise ValueError("p and u must have the same length")
-        n = len(p)
-        grad = np.zeros(n)
-        for i in range(n):
-            grad[i] = p[i] + 2 * self.beta * u[i]
-        return grad
+        return p + 2.0 * self.beta * u
 
     def V(self, grid, u, y1, y2):
         """Objective functional."""
@@ -99,25 +90,17 @@ class DateGenerator:
             raise RuntimeError("generate initial value before data_generation().")
         failed_ini = []
 
-        # time diecretization
         grid = np.arange(0.0, self.T_final + self.dt, self.dt)
         guess = np.ones((4, grid.size))
-
-        N = self.x0_values.shape[0]
         dtype = [('x', '2float64'), ('dv', '2float64'), ('v', 'float64')]
-        dataset = np.zeros(N, dtype=dtype)
+        rows = []
 
-        print(f"N = {N}")
-        for i in range(N):
-            # Get initial condition from the grid
-            ini = self.x0_values[i]
-
-            # Generate boundary conditions
+        print(f"N = {self.x0_values.shape[0]}")
+        for i, ini in enumerate(self.x0_values):
             bc_func = self.gen_bc(ini)
-
             print(f"i = {i}")
             print(f"ini = {ini}")
-            dv, v = op.OpenLoopOptimizer(
+            dv, v = BvpBbOpenLoopOptimizer(
                 self.VDP,
                 bc_func,
                 self.V,
@@ -129,49 +112,44 @@ class DateGenerator:
             ).optimize()
 
             if dv is not None and not np.isnan(v):
-                dataset[i] = (ini, dv, v)
+                rows.append((ini, dv, v))
             else:
-                # Store failed initial condition
                 failed_ini.append(ini)
                 print(f"Failed to converge for ini = {ini}")
-        
-        # Return dataset and failed initial conditions
+
+        dataset = np.array(rows, dtype=dtype) if rows else np.zeros(0, dtype=dtype)
         return dataset, failed_ini
 
-    def data_save(self, dataset, failed_ini, rawdata_subdir: str = "raw_data"):
+    def data_save(
+        self,
+        dataset,
+        failed_ini,
+        output_dir: str | Path,
+        tag: str | None = None,
+    ) -> tuple[Path, Path | None]:
         """
-        Save dataset and failed initial conditions to .npy files under rawdata.
+        Save dataset and failed initial conditions to an explicit directory.
 
         This function is intentionally stateless: it only saves the arrays that are
         passed in (typically the return values of `data_generation`) and does not
         rely on any other attributes of the class instance.
         """
-        # Base rawdata directory (../rawdata relative to this file)
-        base_dir = os.path.join(os.path.dirname(__file__), "..", "rawdata")
-        save_dir = os.path.join(base_dir, rawdata_subdir)
-        os.makedirs(save_dir, exist_ok=True)
+        save_dir = Path(output_dir)
+        save_dir.mkdir(parents=True, exist_ok=True)
 
-        date_tag = datetime.now().strftime("%Y%m%d")
+        date_tag = datetime.now().strftime("%Y%m%d") if tag is None else tag
 
-        # Simple filenames; we do not encode any global information (beta, grid, etc.)
-        output_file = os.path.join(
-            save_dir,
-            f"VDP_dataset_{date_tag}.npy",
-        )
-        failed_output_file = os.path.join(
-            save_dir,
-            f"VDP_failed_ini_{date_tag}.npy",
-        )
+        output_file = save_dir / f"VDP_dataset_{date_tag}.npy"
+        failed_output_file = save_dir / f"VDP_failed_ini_{date_tag}.npy"
 
-        # Save main dataset
         print(f"Saving dataset to {output_file}")
         np.save(output_file, dataset)
 
-        # Save failed initial conditions if any
         if failed_ini is not None and len(failed_ini) > 0:
             failed_ini_arr = np.array(failed_ini)
             print(f"Saving {len(failed_ini_arr)} failed initial conditions to {failed_output_file}")
             np.save(failed_output_file, failed_ini_arr)
+            return output_file, failed_output_file
         else:
             print("No failed initial conditions to save")
-
+            return output_file, None
