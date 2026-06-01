@@ -183,7 +183,7 @@ def log_training_run(
         Run        = ``"gamma_{gamma}"``
 
     Args:
-        result: A result dict returned by ``PDPA_v2.retrain()``.
+        result: A result dict returned by ``PDAP.fit()``.
         seed: Random seed used for the experiment.
         artifacts: Optional ``{name: file_path}`` dict of artifacts to log.
         tracking_uri: MLflow tracking URI.
