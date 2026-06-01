@@ -16,6 +16,11 @@ from src.OpenLoop.forward_backward_optimizer import (
     ForwardBackwardOpenLoopResult,
 )
 from src.OpenLoop.pendulum.finite_horizon_problem import PendulumSwingUpProblem
+from src.OpenLoop.sample_sets import (
+    grid_initial_states,
+    random_initial_states,
+    save_dataset_bundle,
+)
 
 
 PENDULUM_FINITE_HORIZON_DTYPE = np.dtype(
@@ -173,10 +178,12 @@ class PendulumFiniteHorizonDataGenerator:
         theta_range: tuple[float, float] = (-np.pi, np.pi),
         omega_range: tuple[float, float] = (-4.0, 4.0),
     ) -> None:
-        theta_values = np.linspace(theta_range[0], theta_range[1], nx_theta)
-        omega_values = np.linspace(omega_range[0], omega_range[1], nx_omega)
-        theta_grid, omega_grid = np.meshgrid(theta_values, omega_values)
-        self.x0_values = np.column_stack((theta_grid.ravel(), omega_grid.ravel()))
+        self.x0_values = grid_initial_states(
+            nx_theta,
+            nx_omega,
+            theta_range,
+            omega_range,
+        )
         print(f"Created {self.x0_values.shape[0]} pendulum initial states")
 
     def apply_random_initial_sampling(
@@ -186,10 +193,12 @@ class PendulumFiniteHorizonDataGenerator:
         omega_range: tuple[float, float] = (-4.0, 4.0),
         seed: int | None = None,
     ) -> None:
-        rng = np.random.default_rng(seed)
-        theta_values = rng.uniform(theta_range[0], theta_range[1], n_samples)
-        omega_values = rng.uniform(omega_range[0], omega_range[1], n_samples)
-        self.x0_values = np.column_stack((theta_values, omega_values))
+        self.x0_values = random_initial_states(
+            n_samples,
+            theta_range,
+            omega_range,
+            seed=seed,
+        )
         print(f"Sampled {self.x0_values.shape[0]} pendulum initial states")
 
     def data_generation(self) -> tuple[np.ndarray, list[dict[str, object]], list[dict[str, object]]]:
@@ -388,10 +397,15 @@ class PendulumFiniteHorizonDataGenerator:
         failed_path = save_dir / f"PENDULUM_transient_openloop_failed_{date_tag}.json"
         diagnostics_path = save_dir / f"PENDULUM_transient_openloop_diagnostics_{date_tag}.json"
 
-        np.save(data_path, dataset)
-        failed_path.write_text(json.dumps(failed, indent=2), encoding="utf-8")
-        diagnostics_path.write_text(json.dumps(diagnostics, indent=2), encoding="utf-8")
-        return data_path, failed_path, diagnostics_path
+        saved = save_dataset_bundle(
+            save_dir,
+            arrays={data_path.name: dataset},
+            json_files={
+                failed_path.name: failed,
+                diagnostics_path.name: diagnostics,
+            },
+        )
+        return saved[data_path.name], saved[failed_path.name], saved[diagnostics_path.name]
 
 
 def solve_pendulum_finite_horizon_point(

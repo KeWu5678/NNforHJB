@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-import json
 from pathlib import Path
 from typing import Iterable
 
@@ -12,6 +11,11 @@ import numpy as np
 
 from src.OpenLoop.bvp_bb_optimizer import BvpBbOpenLoopOptimizer
 from src.OpenLoop.pendulum.swingup_dynamics import PendulumSwingUpDynamics
+from src.OpenLoop.sample_sets import (
+    grid_initial_states,
+    random_initial_states,
+    save_dataset_bundle,
+)
 
 
 PENDULUM_BB_DTYPE = np.dtype(
@@ -248,7 +252,7 @@ class PendulumBBDataGenerator:
                 verbose=verbose,
             )
             try:
-                gradient, value = optimizer.optimize()
+                result = optimizer.optimize_result()
             except Exception as exc:
                 results.append(
                     PendulumBBResult(
@@ -264,20 +268,25 @@ class PendulumBBDataGenerator:
                 )
                 continue
 
-            converged = gradient is not None and np.isfinite(value)
+            converged = (
+                result.gradient is not None
+                and result.value is not None
+                and result.converged
+                and np.isfinite(result.value)
+            )
             results.append(
                 PendulumBBResult(
                     initial_state=initial_state,
-                    gradient=np.asarray(gradient if converged else np.full(2, np.nan)),
-                    value=float(value) if converged else np.nan,
+                    gradient=np.asarray(
+                        result.gradient if converged else np.full(2, np.nan)
+                    ),
+                    value=float(result.value) if converged else np.nan,
                     converged=bool(converged),
-                    message=optimizer.last_message,
+                    message=result.message,
                     seed_index=seed_index,
-                    iterations=int(optimizer.last_iterations),
+                    iterations=int(result.iterations),
                     gradient_norm=float(
-                        optimizer.last_gradient_norm
-                        if optimizer.last_gradient_norm is not None
-                        else np.inf
+                        result.gradient_norm if result.gradient_norm is not None else np.inf
                     ),
                 )
             )
@@ -294,10 +303,12 @@ class PendulumBBDataGenerator:
         theta_range: tuple[float, float] = (-np.pi, np.pi),
         omega_range: tuple[float, float] = (-8.0, 8.0),
     ) -> None:
-        theta_values = np.linspace(theta_range[0], theta_range[1], nx_theta)
-        omega_values = np.linspace(omega_range[0], omega_range[1], nx_omega)
-        theta_grid, omega_grid = np.meshgrid(theta_values, omega_values)
-        self.x0_values = np.column_stack((theta_grid.ravel(), omega_grid.ravel()))
+        self.x0_values = grid_initial_states(
+            nx_theta,
+            nx_omega,
+            theta_range,
+            omega_range,
+        )
         print(f"Created {self.x0_values.shape[0]} pendulum initial states")
 
     def apply_random_initial_sampling(
@@ -307,10 +318,12 @@ class PendulumBBDataGenerator:
         omega_range: tuple[float, float] = (-8.0, 8.0),
         seed: int | None = None,
     ) -> None:
-        rng = np.random.default_rng(seed)
-        theta_values = rng.uniform(theta_range[0], theta_range[1], n_samples)
-        omega_values = rng.uniform(omega_range[0], omega_range[1], n_samples)
-        self.x0_values = np.column_stack((theta_values, omega_values))
+        self.x0_values = random_initial_states(
+            n_samples,
+            theta_range,
+            omega_range,
+            seed=seed,
+        )
         print(f"Sampled {self.x0_values.shape[0]} pendulum initial states")
 
     def data_generation(
@@ -374,8 +387,9 @@ class PendulumBBDataGenerator:
         data_path = base_dir / f"PENDULUM_bb_openloop_{date_tag}.npy"
         failed_path = base_dir / f"PENDULUM_bb_openloop_failed_{date_tag}.json"
 
-        np.save(data_path, dataset)
-        if failed:
-            failed_path.write_text(json.dumps(failed, indent=2), encoding="utf-8")
-            return data_path, failed_path
-        return data_path, None
+        saved = save_dataset_bundle(
+            base_dir,
+            arrays={data_path.name: dataset},
+            json_files={failed_path.name: failed} if failed else None,
+        )
+        return saved[data_path.name], saved.get(failed_path.name)

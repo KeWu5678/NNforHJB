@@ -7,6 +7,7 @@ def test_forward_backward_public_imports_are_available() -> None:
     from src.OpenLoop.forward_backward_optimizer import (
         ForwardBackwardOpenLoopOptimizer,
         ForwardBackwardOpenLoopResult,
+        ForwardBackwardOpenLoopProblem,
     )
     from src.OpenLoop.pendulum.finite_horizon_problem import PendulumSwingUpProblem
 
@@ -15,6 +16,35 @@ def test_forward_backward_public_imports_are_available() -> None:
     assert problem.T_final == 0.1
     assert ForwardBackwardOpenLoopOptimizer.__name__ == "ForwardBackwardOpenLoopOptimizer"
     assert ForwardBackwardOpenLoopResult.__name__ == "ForwardBackwardOpenLoopResult"
+    assert ForwardBackwardOpenLoopProblem.__name__ == "ForwardBackwardOpenLoopProblem"
+
+
+def test_sample_set_helpers_create_grid_random_and_saved_files(tmp_path) -> None:
+    from src.OpenLoop.sample_sets import (
+        grid_initial_states,
+        random_initial_states,
+        save_dataset_bundle,
+    )
+
+    grid = grid_initial_states(2, 3, (-1.0, 1.0), (-2.0, 2.0))
+    random_a = random_initial_states(4, (-1.0, 1.0), (-2.0, 2.0), seed=7)
+    random_b = random_initial_states(4, (-1.0, 1.0), (-2.0, 2.0), seed=7)
+
+    assert grid.shape == (6, 2)
+    assert np.allclose(grid[0], [-1.0, -2.0])
+    assert np.allclose(grid[-1], [1.0, 2.0])
+    assert random_a.shape == (4, 2)
+    assert np.allclose(random_a, random_b)
+
+    saved = save_dataset_bundle(
+        output_dir=tmp_path,
+        arrays={"sample.npy": grid},
+        json_files={"meta.json": {"n": int(grid.shape[0])}},
+    )
+
+    assert saved["sample.npy"] == tmp_path / "sample.npy"
+    assert saved["meta.json"] == tmp_path / "meta.json"
+    assert np.load(saved["sample.npy"]).shape == (6, 2)
 
 
 def test_finite_horizon_generator_is_available() -> None:

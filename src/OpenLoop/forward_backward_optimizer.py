@@ -11,7 +11,7 @@ variables and evaluates each objective/gradient by:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Protocol
 
 import numpy as np
 from numpy.polynomial.legendre import legval, legvander
@@ -35,12 +35,39 @@ class ForwardBackwardOpenLoopResult:
     message: str
 
 
+class ForwardBackwardOpenLoopProblem(Protocol):
+    """Problem interface required by the forward-backward optimizer."""
+
+    T_final: float
+    fixed_target_signs: tuple[int, ...]
+
+    def dynamics(self, t: float, y: np.ndarray, u: float) -> np.ndarray: ...
+
+    def adjoint_rhs(self, t: float, y: np.ndarray, p: np.ndarray) -> np.ndarray: ...
+
+    def terminal_cost(self, y_terminal: np.ndarray, fixed_target_sign: int) -> float: ...
+
+    def terminal_gradient(
+        self,
+        y_terminal: np.ndarray,
+        fixed_target_sign: int,
+    ) -> np.ndarray: ...
+
+    def running_cost(self, y_values: np.ndarray, u_values: np.ndarray) -> np.ndarray: ...
+
+    def stationarity_residual(
+        self,
+        p_values: np.ndarray,
+        u_values: np.ndarray,
+    ) -> np.ndarray: ...
+
+
 class ForwardBackwardOpenLoopOptimizer:
     """Finite-dimensional open-loop optimizer using forward-backward IVP solves."""
 
     def __init__(
         self,
-        problem: object,
+        problem: ForwardBackwardOpenLoopProblem,
         initial_state: np.ndarray,
         fixed_target_sign: Optional[int] = None,
         num_basis: int = 30,
@@ -68,7 +95,7 @@ class ForwardBackwardOpenLoopOptimizer:
 
         if self.initial_state.shape != (2,):
             raise ValueError("initial_state must be a two-dimensional vector")
-        allowed_signs = tuple(getattr(self.problem, "fixed_target_signs", (-1, 1)))
+        allowed_signs = tuple(self.problem.fixed_target_signs)
         if fixed_target_sign is not None and fixed_target_sign not in allowed_signs:
             raise ValueError(
                 "fixed_target_sign must be one of "
@@ -179,7 +206,7 @@ class ForwardBackwardOpenLoopOptimizer:
         return value, coefficient_gradient, info
 
     def optimize_fixed_target(self, fixed_target_sign: int) -> ForwardBackwardOpenLoopResult:
-        allowed_signs = tuple(getattr(self.problem, "fixed_target_signs", (-1, 1)))
+        allowed_signs = tuple(self.problem.fixed_target_signs)
         if fixed_target_sign not in allowed_signs:
             raise ValueError(f"fixed_target_sign must be one of {allowed_signs}")
 
@@ -250,7 +277,7 @@ class ForwardBackwardOpenLoopOptimizer:
         )
 
     def optimize(self, return_all_fixed_targets: bool = False):
-        default_signs = getattr(self.problem, "fixed_target_signs", (-1, 1))
+        default_signs = self.problem.fixed_target_signs
         signs = (
             tuple(default_signs)
             if self.fixed_target_sign is None
@@ -280,3 +307,10 @@ class ForwardBackwardOpenLoopOptimizer:
             converged=bool(result.converged),
             message=f"symmetry transform: {result.message}",
         )
+
+
+__all__ = [
+    "ForwardBackwardOpenLoopOptimizer",
+    "ForwardBackwardOpenLoopProblem",
+    "ForwardBackwardOpenLoopResult",
+]

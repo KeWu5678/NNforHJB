@@ -34,12 +34,6 @@ class BvpBbOpenLoopResult:
     gradient_coefficients: np.ndarray | None
     solution: Any | None = None
 
-    def as_legacy_tuple(self) -> tuple[np.ndarray | None, float | None]:
-        """Return the historical ``(gradient, value)`` API."""
-        if not self.converged:
-            return None, None
-        return self.gradient, self.value
-
 
 @dataclass
 class _ControlEvaluation:
@@ -108,21 +102,6 @@ class BvpBbOpenLoopOptimizer:
         self.line_search_max_iter = int(line_search_max_iter)
         self.line_search_cost_tol = float(line_search_cost_tol)
         self.verbose = bool(verbose)
-
-        # Backward-compatible attribute names used by older problem code.
-        self.ODE = self.dynamics
-        self.bc = self.boundary_conditions
-        self.V = self.objective
-
-        self.last_solution = None
-        self.last_control_coefficients = None
-        self.last_gradient_values = None
-        self.last_gradient_coefficients = None
-        self.last_gradient_norm = None
-        self.last_iterations = 0
-        self.last_converged = False
-        self.last_message = ""
-        self.last_result: BvpBbOpenLoopResult | None = None
 
     def _log(self, message: str) -> None:
         if self.verbose:
@@ -291,7 +270,6 @@ class BvpBbOpenLoopOptimizer:
             ),
             solution=None if evaluation is None else evaluation.solution,
         )
-        self._store_result(result)
         return result
 
     def _success_result(
@@ -318,27 +296,6 @@ class BvpBbOpenLoopOptimizer:
             gradient_coefficients=evaluation.gradient_coefficients.copy(),
             solution=evaluation.solution,
         )
-
-    def _store_result(self, result: BvpBbOpenLoopResult) -> None:
-        self.last_result = result
-        self.last_solution = result.solution
-        self.last_control_coefficients = (
-            None
-            if result.control_coefficients is None
-            else result.control_coefficients.copy()
-        )
-        self.last_gradient_values = (
-            None if result.gradient_values is None else result.gradient_values.copy()
-        )
-        self.last_gradient_coefficients = (
-            None
-            if result.gradient_coefficients is None
-            else result.gradient_coefficients.copy()
-        )
-        self.last_gradient_norm = result.gradient_norm
-        self.last_iterations = int(result.iterations)
-        self.last_converged = bool(result.converged)
-        self.last_message = result.message
 
     def optimize_result(self) -> BvpBbOpenLoopResult:
         """Run the optimization and return a structured result."""
@@ -400,14 +357,9 @@ class BvpBbOpenLoopOptimizer:
                 return self._failure_result(message, iteration, current)
 
         result = self._success_result(current, iteration)
-        self._store_result(result)
         self._log(f" cost = {result.value}")
         self._log(f" norm G = {result.gradient_norm}")
         return result
-
-    def optimize(self):
-        """Run optimization and return the historical ``(gradient, value)`` tuple."""
-        return self.optimize_result().as_legacy_tuple()
 
 
 __all__ = ["BvpBbOpenLoopOptimizer", "BvpBbOpenLoopResult"]

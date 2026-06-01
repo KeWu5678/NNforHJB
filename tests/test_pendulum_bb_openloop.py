@@ -122,4 +122,3 @@ def test_bvp_bb_optimizer_exposes_structured_result() -> None:
     assert result.converged
     assert result.gradient.shape == (2,)
     assert np.isfinite(result.value)
-    assert result.as_legacy_tuple()[0].shape == (2,)
