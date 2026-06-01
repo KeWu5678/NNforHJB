@@ -10,8 +10,7 @@ from typing import Optional, Tuple
 import torch
 import os
 from loguru import logger
-from .ssn import SSN
-from .ssn_tr import SSN_TR
+from .SSN import SSN
 from .net import ShallowNetwork
 from .utils import _phi
 
@@ -180,8 +179,9 @@ class model:
         if self.optimizer_type in ["SSN", "SSN_TR"]:
             if self.train_outerweights == True:
                 output_params = [self.net.output.weight]
-                optimizer_class = SSN if self.optimizer_type == "SSN" else SSN_TR
-                self.optimizer = optimizer_class(output_params, alpha=self.alpha, gamma=self.gamma, th=self.th, lr=self.lr, power=self.power)
+                # SSN_TR folded into SSN as the trust-region (Steihaug-CG) method.
+                method = "steihaug_cg" if self.optimizer_type == "SSN_TR" else "levenberg_marquardt"
+                self.optimizer = SSN(output_params, alpha=self.alpha, gamma=self.gamma, th=self.th, lr=self.lr, power=self.power, method=method)
                 if self.verbose:
                     logger.info(f"Using {self.optimizer_type} optimizer with alpha={self.alpha}, gamma={self.gamma}, th={self.th}, lr ={self.lr}")
             else:
@@ -321,7 +321,7 @@ class model:
         successful_steps = 0
         for epoch in range(iterations):
             self.optimizer.zero_grad()
-            if isinstance(self.optimizer, (SSN, SSN_TR)):
+            if isinstance(self.optimizer, SSN):
                 x_detach = train_x_tensor.detach()
                 S = self.net.forward_network_matrix(x_detach).detach()       # (N, n)
                 S_grad = self.net.forward_gradient_kernel(x_detach).detach() # (N*d, n)
@@ -359,7 +359,7 @@ class model:
             #     best_state = {k: v.detach().clone() for k, v in self.net.state_dict().items()}
 
             # Early-stop SSN training if line search fails repeatedly
-            if isinstance(self.optimizer, (SSN, SSN_TR)):
+            if isinstance(self.optimizer, SSN):
                 step_success = bool(getattr(self.optimizer, "last_step_success", True))
                 if not step_success:
                     consecutive_failed_ssn_steps += 1
