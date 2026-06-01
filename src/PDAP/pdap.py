@@ -17,15 +17,17 @@ The loop is model-agnostic: it drives the model through the uniform interface
 
 from __future__ import annotations
 
+import logging
 from typing import Dict, List, Tuple
 
 import numpy as np
 import torch
-from loguru import logger
 
 from ..models.signed import SignedModel
 from ..models.semiconcave import SemiconcaveModel
 from .insertion import profile_threshold, finite_step
+
+logger = logging.getLogger(__name__)
 
 
 class PDAP:

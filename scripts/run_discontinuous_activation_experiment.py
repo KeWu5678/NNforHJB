@@ -24,6 +24,7 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.run_activation_experiment import ACTIVATIONS as BASE_ACTIVATIONS  # noqa: E402
 from src.PDAP import from_alias  # noqa: E402
+from src.experiment_logging import ExperimentRun  # noqa: E402
 from src.net import ShallowNetwork  # noqa: E402
 
 GAMMAS = [0, 1e-2, 1e-1, 1, 10]
@@ -42,6 +43,16 @@ def gaussian_notebook(z: torch.Tensor) -> torch.Tensor:
 
 ACTIVATIONS = dict(BASE_ACTIVATIONS)
 ACTIVATIONS["gaussian"] = (gaussian_notebook, False)
+
+
+def write_discontinuous_activation_run_record(output_dir: Path, summary: dict[str, Any]) -> Path:
+    run = ExperimentRun(
+        output_dir,
+        name="activation_search_analytical",
+        run_id=f"{summary['activation']}_seed{summary['seed']}",
+        config={"activation": summary["activation"], "seed": summary["seed"]},
+    )
+    return run.finish(summary=summary)
 
 
 def set_seed(seed: int) -> None:
@@ -163,11 +174,28 @@ def main() -> int:
     parser.add_argument("--train-grid-size", type=int, default=30)
     parser.add_argument("--eval-grid-size", type=int, default=61)
     parser.add_argument("--c-jump", type=float, default=C_JUMP)
+    parser.add_argument("--output-dir", type=Path, default=None)
     args = parser.parse_args()
 
     activation_fn, use_sphere = ACTIVATIONS[args.activation]
     train_data, _ = make_grid(args.train_grid_size, c_jump=args.c_jump)
     eval_data, eval_dist = make_grid(args.eval_grid_size, c_jump=args.c_jump)
+    run = None
+    if args.output_dir is not None:
+        run = ExperimentRun(
+            args.output_dir,
+            name="activation_search_analytical",
+            run_id=f"{args.activation}_seed{args.seed}",
+            config={
+                "activation": args.activation,
+                "seed": args.seed,
+                "num_iterations": args.num_iterations,
+                "num_insertion": args.num_insertion,
+                "train_grid_size": args.train_grid_size,
+                "eval_grid_size": args.eval_grid_size,
+                "c_jump": args.c_jump,
+            },
+        )
 
     per_gamma = []
     start = time.time()
@@ -233,6 +261,9 @@ def main() -> int:
         "best_val_h1": best["val_h1"],
         "best_n": best["n"],
     }
+    if run is not None:
+        path = run.finish(summary=out)
+        print(f"saved run record: {path}", file=sys.stderr, flush=True)
     print(json.dumps(out))
     return 0
 

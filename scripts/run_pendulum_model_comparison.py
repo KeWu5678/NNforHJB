@@ -49,6 +49,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from scripts.run_discontinuous_activation_experiment import ACTIVATIONS, set_seed  # noqa: E402
 from src.PDAP import from_alias  # noqa: E402
+from src.experiment_logging import ExperimentRun  # noqa: E402
 from src.net import ShallowNetwork  # noqa: E402
 
 
@@ -399,8 +400,18 @@ def run_model(model_name, seed, ctx, args) -> dict[str, Any]:
 
 def write_outputs(output_dir: Path, run: dict[str, Any]) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
-    run_path = output_dir / f"{run['model']}_{run['activation']}_seed{run['seed']}.json"
-    run_path.write_text(json.dumps(run, indent=2, default=str) + "\n", encoding="utf-8")
+    run_record = ExperimentRun(
+        output_dir,
+        name="pendulum_model_comparison",
+        run_id=f"{run['model']}_{run['activation']}_seed{run['seed']}",
+        config={
+            "model": run["model"],
+            "dataset": run["dataset"],
+            "activation": run["activation"],
+            "seed": run["seed"],
+        },
+    )
+    run_record.finish(status=run.get("status", "completed"), summary=run)
 
 
 def write_summary(output_dir: Path, runs: list[dict[str, Any]]) -> None:

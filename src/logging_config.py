@@ -1,81 +1,58 @@
-#!/usr/bin/env python3
-"""
-Centralized logging configuration for the NNforHJB repository.
+"""Diagnostic logging configuration for scripts and notebooks."""
 
-This module provides a single function to configure loguru logging consistently
-across all modules in the repository. It should be called once at application startup.
-"""
+from __future__ import annotations
 
-import os
+import logging
 import sys
-from loguru import logger
+from pathlib import Path
 
 
-def setup_logging(verbose=True, log_file=None, log_level="DEBUG", rotation="10 MB"):
-    """
-    Configure loguru logger for the entire repository.
-    
-    This function should be called once at the start of your application/notebook.
-    It sets up both console and file logging with consistent formatting.
-    
-    Args:
-        verbose (bool): Whether to print logs to terminal (default: True)
-        log_file (str, optional): Path to log file. If None, uses default location
-                                   in log_history/training.log relative to project root
-        log_level (str): Minimum log level for file logging (default: "DEBUG")
-        rotation (str): Log file rotation size (default: "10 MB")
-    
-    Example:
-        >>> from src.logging_config import setup_logging
-        >>> setup_logging(verbose=True)
-        >>> from loguru import logger
-        >>> logger.info("This will be logged to both console and file")
-    """
-    # Remove default handler to avoid duplicates
-    logger.remove()
-    
+DIAGNOSTIC_FORMAT = "%(levelname)s %(message)s"
+
+
+def configure_logging(
+    *,
+    verbose: bool = True,
+    log_file: str | Path | None = None,
+    level: int | str = logging.INFO,
+) -> logging.Logger:
+    """Configure concise diagnostic logging and return the project logger."""
+    root = logging.getLogger()
+    root.handlers.clear()
+    root.setLevel(level)
+
+    formatter = logging.Formatter(DIAGNOSTIC_FORMAT)
     if verbose:
-        # Add terminal output with colored formatting
-        logger.add(
-            sys.stdout,
-            format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
-            level="INFO",
-            colorize=True
-        )
-    
-    # Determine log file path
-    if log_file is None:
-        # Default: log_history/training.log relative to project root
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        log_history_dir = os.path.join(current_dir, "..", "log_history")
-        os.makedirs(log_history_dir, exist_ok=True)
-        log_file = os.path.join(log_history_dir, "training.log")
-    
-    # Always log to file (even if verbose=False)
-    logger.add(
-        log_file,
-        format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}",
-        level=log_level,
-        rotation=rotation,
-        retention="30 days",  # Keep logs for 30 days
-        compression="zip"  # Compress old logs
-    )
-    
-    if verbose:
-        logger.info("Logging configured successfully")
+        console = logging.StreamHandler(sys.stderr)
+        console.setFormatter(formatter)
+        console.setLevel(level)
+        root.addHandler(console)
+
+    if log_file is not None:
+        path = Path(log_file)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        file_handler = logging.FileHandler(path, encoding="utf-8")
+        file_handler.setFormatter(formatter)
+        file_handler.setLevel(level)
+        root.addHandler(file_handler)
+
+    return logging.getLogger("nnforhjb")
 
 
-def get_logger():
+def setup_logging(
+    verbose: bool = True,
+    log_file: str | Path | None = None,
+    log_level: int | str = logging.INFO,
+    rotation: str | None = None,
+) -> logging.Logger:
+    """Backward-compatible alias for older callers.
+
+    ``rotation`` is accepted for old Loguru-style calls but is not used by the
+    standard-library implementation.
     """
-    Get the configured logger instance.
-    
-    This is a convenience function that returns the loguru logger.
-    You can also directly import: from loguru import logger
-    
-    Returns:
-        Logger: The configured loguru logger instance
-    """
-    return logger
+    del rotation
+    return configure_logging(verbose=verbose, log_file=log_file, level=log_level)
 
 
-
+def get_logger(name: str = "nnforhjb") -> logging.Logger:
+    return logging.getLogger(name)

@@ -23,6 +23,7 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from src.PDAP import from_alias
 from src.activations import matern52
+from src.experiment_logging import ExperimentRun
 
 
 def swish_beta(beta: float):
@@ -329,6 +330,16 @@ PRUNING_THRESHOLD = 1e-5
 DATA_PATH = REPO_ROOT / "rawdata/raw_data/data/VDP_beta_0.1_grid_30x30.npy"
 
 
+def write_activation_run_record(output_dir: Path, summary: dict) -> Path:
+    run = ExperimentRun(
+        output_dir,
+        name="activation_search",
+        run_id=f"{summary['activation']}_seed{summary['seed']}",
+        config={"activation": summary["activation"], "seed": summary["seed"]},
+    )
+    return run.finish(summary=summary)
+
+
 def set_seed(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
@@ -353,10 +364,24 @@ def main() -> int:
     p.add_argument("--seed", type=int, required=True)
     p.add_argument("--num-iterations", type=int, default=NUM_ITERATIONS)
     p.add_argument("--num-insertion",  type=int, default=NUM_INSERTION)
+    p.add_argument("--output-dir", type=Path, default=None)
     args = p.parse_args()
 
     activation_fn, use_sphere = ACTIVATIONS[args.activation]
     data = load_data()
+    run = None
+    if args.output_dir is not None:
+        run = ExperimentRun(
+            args.output_dir,
+            name="activation_search",
+            run_id=f"{args.activation}_seed{args.seed}",
+            config={
+                "activation": args.activation,
+                "seed": args.seed,
+                "num_iterations": args.num_iterations,
+                "num_insertion": args.num_insertion,
+            },
+        )
 
     per_gamma = []
     t0 = time.time()
@@ -396,6 +421,9 @@ def main() -> int:
         "best_h1":    best["h1"],
         "best_n":     best["n"],
     }
+    if run is not None:
+        path = run.finish(summary=out)
+        print(f"saved run record: {path}", file=sys.stderr, flush=True)
     print(json.dumps(out))
     return 0
 

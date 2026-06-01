@@ -14,13 +14,15 @@ Each is a free function taking the optimizer instance ``opt`` (for its ``_prox``
 post-step loss, restoring the params snapshot on rejection.
 """
 
+import logging
 from typing import Callable
 
 import torch
 from torch import Tensor
-from loguru import logger
 
 from .mpcg import mpcg
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["solve_levenberg_marquardt", "solve_steihaug_cg"]
 

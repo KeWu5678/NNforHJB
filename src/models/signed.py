@@ -7,12 +7,14 @@ Created on Tue Dec  3 18:30:52 2024
 """
 
 from typing import Optional, Tuple
+import logging
 import torch
 import os
-from loguru import logger
 from ..SSN import SSN
 from ..net import ShallowNetwork
 from ..utils import _phi, _phi_prox
+
+logger = logging.getLogger(__name__)
 
 
 class SignedModel:
