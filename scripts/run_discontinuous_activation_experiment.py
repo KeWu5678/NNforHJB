@@ -2,7 +2,7 @@
 """Run one activation-search experiment on the analytic discontinuous-gradient data.
 
 The training data matches Experiment 3 in notebook/pdpa_vdp.ipynb. Each gamma is
-trained with PDPA_v2, then the selected network is evaluated against the exact
+trained with signed-profile PDAP, then the selected network is evaluated against the exact
 analytic value and gradient on a dense grid. The printed JSON line is consumed
 by autoresearch/ActivationSearch/data:analytical/scripts/aggregate.py.
 """
@@ -24,7 +24,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.run_activation_experiment import ACTIVATIONS as BASE_ACTIVATIONS  # noqa: E402
-from src.PDAP import from_alias  # noqa: E402
+from src.PDAP import PDAP  # noqa: E402
 from src.experiment_logging import RunRecordWriter  # noqa: E402
 from src.logging_config import configure_logging  # noqa: E402
 from src.net import ShallowNetwork  # noqa: E402
@@ -200,12 +200,13 @@ def main() -> int:
     start = time.time()
     for gamma in GAMMAS:
         set_seed(args.seed)
-        pdpa = from_alias(
-            "v2",
+        pdpa = PDAP(
             data=train_data,
             alpha=ALPHA,
             gamma=gamma,
             power=POWER,
+            model="signed",
+            insertion="profile",
             activation=activation_fn,
             use_sphere=use_sphere,
             loss_weights=LOSS_WEIGHTS,

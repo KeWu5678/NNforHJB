@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare PDPA_v1 against PDPA_v2 on the pendulum swing-up value data.
+"""Compare semiconcave-profile and signed-profile PDAP on pendulum swing-up data.
 
 This mirrors the semiconcave-reference autoresearch procedure
 (``run_semiconcave_model_comparison.py``) but trains on the *sampled* pendulum
@@ -49,7 +49,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.run_discontinuous_activation_experiment import ACTIVATIONS, set_seed  # noqa: E402
-from src.PDAP import from_alias  # noqa: E402
+from src.PDAP import PDAP  # noqa: E402
 from src.experiment_logging import RunRecordWriter  # noqa: E402
 from src.logging_config import configure_logging  # noqa: E402
 from src.net import ShallowNetwork  # noqa: E402
@@ -62,7 +62,7 @@ def relative_norm(error: np.ndarray, reference: np.ndarray) -> float:
 
 
 def predict_signed_network(result, x, activation=torch.relu):
-    """Rebuild a pure (signed) shallow network from a PDPA_v2 result and predict."""
+    """Rebuild a pure signed shallow network from a PDAP result and predict."""
     best_iteration = int(result["best_iteration"])
     inner = result["inner_weights"][best_iteration]
     weights, bias = inner["weight"], inner["bias"]
@@ -267,20 +267,21 @@ def pendulum_metrics(
 # --------------------------------------------------------------------------- #
 # Training
 # --------------------------------------------------------------------------- #
-def train_v1(train_norm, eval_norm, eval_x_phys, scales, sw_distance, hjb_fn,
-             gamma, seed, args) -> dict[str, Any]:
-    """Semiconcave model under the v2 pipeline (insert -> warm-start -> SSN -> prune)."""
+def train_semiconcave_profile(train_norm, eval_norm, eval_x_phys, scales, sw_distance, hjb_fn,
+                              gamma, seed, args) -> dict[str, Any]:
+    """Semiconcave model with profile-threshold insertion."""
     set_seed(seed)
     start = time.time()
-    pdpa = from_alias(
-        "v1",
+    pdpa = PDAP(
         data=train_norm,
         alpha=args.alpha,
         gamma=gamma,
         power=args.power,
+        model="semiconcave",
+        insertion="profile",
         activation=args.activation_fn,
         loss_weights="h1",
-        lr=args.v2_lr,
+        lr=args.pdap_lr,
         th=args.th,
         use_sphere=args.use_sphere,
         c_init=args.c_init,
@@ -299,7 +300,7 @@ def train_v1(train_norm, eval_norm, eval_x_phys, scales, sw_distance, hjb_fn,
     neurons = int(result["final_neurons"])
     bi = int(result["best_iteration"])
     return {
-        "model": "PDPA_v1",
+        "model": "semiconcave_profile",
         "activation": args.activation_name,
         "seed": seed,
         "gamma": gamma,
@@ -314,19 +315,20 @@ def train_v1(train_norm, eval_norm, eval_x_phys, scales, sw_distance, hjb_fn,
     }
 
 
-def train_v2(train_norm, eval_norm, eval_x_phys, scales, sw_distance, hjb_fn,
-             gamma, seed, args) -> dict[str, Any]:
+def train_signed_profile(train_norm, eval_norm, eval_x_phys, scales, sw_distance, hjb_fn,
+                         gamma, seed, args) -> dict[str, Any]:
     set_seed(seed)
     start = time.time()
-    pdpa = from_alias(
-        "v2",
+    pdpa = PDAP(
         data=train_norm,
         alpha=args.alpha,
         gamma=gamma,
         power=args.power,
+        model="signed",
+        insertion="profile",
         activation=args.activation_fn,
         loss_weights="h1",
-        lr=args.v2_lr,
+        lr=args.pdap_lr,
         optimizer="SSN",
         use_sphere=args.use_sphere,
         verbose=False,
@@ -345,7 +347,7 @@ def train_v2(train_norm, eval_norm, eval_x_phys, scales, sw_distance, hjb_fn,
                                value_pred, grad_pred, hjb_fn)
     best_iteration = int(result["best_iteration"])
     return {
-        "model": "PDPA_v2",
+        "model": "signed_profile",
         "activation": args.activation_name,
         "seed": seed,
         "gamma": gamma,
@@ -360,8 +362,10 @@ def train_v2(train_norm, eval_norm, eval_x_phys, scales, sw_distance, hjb_fn,
     }
 
 
-_TRAIN_FNS = {"v1": train_v1, "v2": train_v2}
-_MODEL_LABELS = {"v1": "PDPA_v1", "v2": "PDPA_v2"}
+_TRAIN_FNS = {
+    "semiconcave_profile": train_semiconcave_profile,
+    "signed_profile": train_signed_profile,
+}
 
 
 def run_model(model_name, seed, ctx, args) -> dict[str, Any]:
@@ -380,9 +384,8 @@ def run_model(model_name, seed, ctx, args) -> dict[str, Any]:
 
     ok_rows = [r for r in rows if r["status"] == "ok" and np.isfinite(r["score"])]
     best = min(ok_rows, key=lambda r: r["score"]) if ok_rows else None
-    model_label = _MODEL_LABELS[model_name]
     out: dict[str, Any] = {
-        "model": model_label,
+        "model": model_name,
         "dataset": args.dataset_name,
         "seed": seed,
         "alpha": args.alpha,
@@ -477,8 +480,8 @@ def build_context(dataset_name: str, args: argparse.Namespace) -> dict[str, Any]
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--datasets", default="pmp,transient", help="comma-separated subset of pmp,transient")
-    parser.add_argument("--models", default="v1,v2",
-                        help="comma-separated subset of v1 (semiconcave), v2 (pure NN)")
+    parser.add_argument("--models", default="semiconcave_profile,signed_profile",
+                        help="comma-separated subset of semiconcave_profile,signed_profile")
     parser.add_argument("--activation", default="leaky_relu")
     parser.add_argument("--seeds", default=",".join(str(s) for s in DEFAULT_SEEDS))
     parser.add_argument("--gammas", default=",".join(str(g) for g in DEFAULT_GAMMAS))
@@ -491,7 +494,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--alpha", type=float, default=1e-5)
     parser.add_argument("--th", type=float, default=0.5)
     parser.add_argument("--power", type=float, default=1.0)
-    parser.add_argument("--v2-lr", type=float, default=1.0)
+    parser.add_argument("--pdap-lr", type=float, default=1.0)
     parser.add_argument("--c-init", type=float, default=1.0)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--no-save", action="store_true")
@@ -502,7 +505,7 @@ def parse_args() -> argparse.Namespace:
     if unknown:
         raise ValueError(f"Unknown datasets: {unknown}")
     args.models = [m.strip() for m in args.models.split(",") if m.strip()]
-    unknown_m = [m for m in args.models if m not in {"v1", "v2"}]
+    unknown_m = [m for m in args.models if m not in _TRAIN_FNS]
     if unknown_m:
         raise ValueError(f"Unknown models: {unknown_m}")
     if args.activation not in ACTIVATIONS:

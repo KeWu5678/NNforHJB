@@ -1,7 +1,6 @@
 """The unified PDAP outer loop.
 
-One ``PDAP`` class replaces the former ``PDPA_v1/v2/v3``.  It is configured by
-two axes (plus convenience aliases in :mod:`registry`):
+One ``PDAP`` class is configured by two explicit axes:
 
   * ``model``     — ``"signed"`` (pure network) or ``"semiconcave"`` (V = 0.5 C||x||^2 - g).
   * ``insertion`` — ``"profile"`` (dual-threshold) or ``"finite_step"`` (Delta J < 0).
@@ -101,9 +100,22 @@ class PDAP:
         if self.model.input_dim is None:
             raise ValueError("Could not infer input dimension from data['x'] (N, d).")
         self.input_dim = int(self.model.input_dim)
+        if verbose:
+            train_count = int(self.data_train[0].shape[0])
+            valid_count = int(self.data_valid[0].shape[0])
+            logger.info("PDAP run")
+            logger.info("  +------------------+--------------------------+")
+            logger.info("  | %-16s | %-24s |", "model", type(self.model).__name__)
+            logger.info("  | %-16s | %-24s |", "insertion rule", self.insertion_kind.replace("_", " "))
+            logger.info("  | %-16s | %-24s |", "samples", f"{train_count} train, {valid_count} validation")
+            logger.info("  | %-16s | %-24d |", "input dimension", self.input_dim)
+            logger.info("  | %-16s | %-24.2e |", "alpha", self.alpha)
+            logger.info("  | %-16s | %-24.2e |", "gamma", self.model.gamma)
+            logger.info("  | %-16s | %-24.3g |", "activation power", self.model.power)
+            logger.info("  +------------------+--------------------------+")
 
     # ------------------------------------------------------------------ #
-    # Shared helpers (formerly on PDPA_v2)
+    # Shared helpers
     # ------------------------------------------------------------------ #
     def sample_uniform_sphere_points(self, N: int) -> Tuple[torch.Tensor, torch.Tensor]:
         """Sample N candidate neurons uniformly on S^d in R^{d+1}."""
@@ -197,7 +209,7 @@ class PDAP:
     # Insertion dispatch (residuals + existing support read from the model)
     # ------------------------------------------------------------------ #
     # The insertion-candidate merge tolerance is independent of the prune
-    # tolerance: the former PDPA_v* called insertion() with its own default 1e-2
+    # tolerance: insertion uses its own default 1e-2
     # while passing retrain's merge_tol (default 1e-3) only to prune_small_weights.
     INSERTION_MERGE_TOL = 1e-2
 
@@ -250,8 +262,6 @@ class PDAP:
         best_train_loss = float("inf")
 
         # --- initialization: insert + warm-start ---
-        if verbose:
-            logger.info("Initialization")
         W_np, b_np, c = self._insert(num_insertion, max_insert, verbose)
         W = torch.as_tensor(W_np, dtype=torch.float64)
         b = torch.as_tensor(b_np, dtype=torch.float64)
@@ -269,12 +279,21 @@ class PDAP:
             if decorrelation:
                 c = c[keep]
         self.model.set_atoms(W, b, c)
+        if verbose:
+            max_weight = float(c.abs().max().item()) if c.numel() else 0.0
+            logger.debug("Initial support  neurons=%d  max |output|=%.2e", int(W.shape[0]), max_weight)
+            logger.info("Progress")
+            logger.info("  +---------+---------+--------------+--------------+------------+------------+")
+            logger.info("  | %-7s | %7s | %12s | %12s | %10s | %10s |",
+                        "iter", "neurons", "train loss", "val loss", "val L2", "val H1")
+            logger.info("  +---------+---------+--------------+--------------+------------+------------+")
 
         for i in range(num_iterations):
             supp_before = self.model.n_neurons
 
             # 1. SSN on outer weights (inner weights frozen)
             self.model.fit_outer_weights(self.data_train, self.data_valid, iterations=20, display_every=2)
+            fit_summary = getattr(self.model, "last_fit_summary", {})
 
             # 2. prune: merge duplicates + remove zeros
             W, b, c = self.model.get_atoms()
@@ -303,9 +322,19 @@ class PDAP:
                 best_iteration_train = i
 
             if verbose:
+                if supp_before != self.model.n_neurons:
+                    logger.debug(
+                        "Support changed during pruning at iteration %d: %d -> %d neurons",
+                        i + 1, supp_before, self.model.n_neurons,
+                    )
+                logger.debug(
+                    "Output-weight solver at iteration %d selected inner step %s",
+                    i + 1, fit_summary.get("best_step", "n/a"),
+                )
                 logger.info(
-                    f"PDAP: {i + 1:3d}, supp: {supp_before}->{self.model.n_neurons}, "
-                    f"train: {tl:.2e}, val: {vl:.2e}, L2: {l2v:.2e}, H1: {h1v:.2e}"
+                    "  | %-7s | %7d | %12.3e | %12.3e | %10.3e | %10.3e |",
+                    f"{i + 1}/{num_iterations}", self.model.n_neurons,
+                    tl, vl, l2v, h1v,
                 )
 
             # 4. insert new neurons + warm-start
@@ -346,6 +375,14 @@ class PDAP:
         }
         if isinstance(self.model, SemiconcaveModel):
             result["C"] = float(self.model.C)
+        if verbose:
+            logger.info("  +---------+---------+--------------+--------------+------------+------------+")
+            logger.info("Result")
+            logger.info("  +------------------+--------------------------+")
+            logger.info("  | %-16s | %-24d |", "best iteration", best_iteration_train + 1)
+            logger.info("  | %-16s | %-24.3e |", "best train loss", best_train_loss)
+            logger.info("  | %-16s | %-24d |", "best neurons", best_neurons)
+            logger.info("  +------------------+--------------------------+")
         return result
 
     def predict(self, x):

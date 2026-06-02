@@ -1,7 +1,8 @@
 # Activation Search - VDP HJB Summary
 
 This folder summarizes the activation search on the smooth VDP HJB dataset
-with `PDPA_v2` (`power=1`, `loss=h1`, gamma sweep
+with signed-profile PDAP (`model="signed"`, `insertion="profile"`, `power=1`,
+`loss=h1`, gamma sweep
 `[0, 0.01, 0.1, 1, 10]`). The original search evaluated 132 activation
 variants. Since many adjacent ranks were just beta/width variants of the same
 activation, the results below are consolidated by activation family.

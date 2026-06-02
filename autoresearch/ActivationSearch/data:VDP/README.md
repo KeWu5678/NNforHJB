@@ -55,8 +55,9 @@ Everything else gets `False`.
 
 ## Caveats
 
-- The algorithm is fixed at `power=1` (the only fully working configuration of
-  PDPA_v2 — the `power != 1` SSN bug is documented in `CLAUDE.md`).
+- The algorithm is fixed to signed-profile PDAP at `power=1` (the only fully
+  working signed-profile configuration for this search — the `power != 1` SSN
+  bug is documented in `CLAUDE.md`).
 - Training loss is `loss_weights="h1"`. The scoring loss is `err_h1_val`. These
   are aligned by design.
 - This is a *search*, not a *hill-climb*. There is no keep/discard branching.

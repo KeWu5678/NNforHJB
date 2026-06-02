@@ -66,11 +66,10 @@ class SignedModel:
         self.net = None
         self.optimizer = None  # Will store the actual optimizer instance (standard PyTorch convention)
         self.loss_history = {'train_loss': [], 'val_loss': [], 'value_loss': [], 'grad_loss': []}
+        self.last_fit_summary = {}
         self.config = None
         
-        # Log initialization (logger should be configured at application level via configure_logging())
-        if self.verbose:
-            logger.info("Model initialized")
+        # High-level setup is logged by PDAP after the data has been prepared.
     
     def _prepare_data(self, data: dict) -> Tuple[Tuple[torch.Tensor, torch.Tensor, torch.Tensor], Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
         """
@@ -103,9 +102,6 @@ class SignedModel:
         train_x, valid_x = ob_x[:split_idx], ob_x[split_idx:]
         train_v, valid_v = ob_v[:split_idx], ob_v[split_idx:]
         train_dv, valid_dv = ob_dv[:split_idx], ob_dv[split_idx:]
-        
-        if self.verbose:
-            logger.info(f"Training set: {len(train_x)} samples, Validation set: {len(valid_x)} samples")
         
         # Convert to tensors
         train_tensors = (
@@ -151,7 +147,7 @@ class SignedModel:
                 # Number of neurons is the first dimension for PyTorch
                 n = inner_weights.shape[0]
                 if self.verbose:
-                    logger.info(f"Creating network with {n} neurons")
+                    logger.debug("Network support  atoms=%d", n)
         
         # Create the shallow network
             self.net = ShallowNetwork(
@@ -185,7 +181,10 @@ class SignedModel:
                 method = "steihaug_cg" if self.optimizer_type == "SSN_TR" else "levenberg_marquardt"
                 self.optimizer = SSN(output_params, alpha=self.alpha, gamma=self.gamma, th=self.th, lr=self.lr, power=self.power, method=method)
                 if self.verbose:
-                    logger.info(f"Using {self.optimizer_type} optimizer with alpha={self.alpha}, gamma={self.gamma}, th={self.th}, lr ={self.lr}")
+                    logger.debug(
+                        "Output-weight solver  method=%s  alpha=%.2e  gamma=%.2e  penalty_mix=%.2f  lr=%.2g",
+                        self.optimizer_type, self.alpha, self.gamma, self.th, self.lr,
+                    )
             else:
                 # SSN optimizer is for outerweights only
                 logger.debug(f"SSN optimizer is for outerweights only")
@@ -194,7 +193,7 @@ class SignedModel:
             optimizer_class = getattr(torch.optim, self.optimizer_type, None)
 
             if optimizer_class is None:
-                logger.info(f"Warning: {self.optimizer_type} not found, using SGD")
+                logger.warning("Optimizer %r is not available; using SGD instead", self.optimizer_type)
                 optimizer_class = torch.optim.SGD
             # Always instantiate the optimizer (including fallback SGD)
             self.optimizer = optimizer_class(output_params, lr=self.lr)
@@ -374,9 +373,13 @@ class SignedModel:
                 tau = 0.0
             W_outer_new = tau * coeff
             if verbose:
-                logger.info(
-                    f"Coord. descent: phat={phat:.2e}, what={what:.2e}, tau={tau:.4e}, "
-                    f"|W_outer| range=[{W_outer_new.abs().min():.2e}, {W_outer_new.abs().max():.2e}]"
+                logger.debug(
+                    "Warm start        initialized %d new output weights  max |weight|=%.2e",
+                    n_new, float(W_outer_new.abs().max().item()),
+                )
+                logger.debug(
+                    "Warm-start details: descent_score=%.2e curvature=%.2e step=%.4e min_abs_weight=%.2e",
+                    -phat, what, tau, float(W_outer_new.abs().min().item()),
                 )
         return W_outer_new.reshape(-1)
 
@@ -431,7 +434,9 @@ class SignedModel:
         train_x_tensor, train_v_tensor, train_dv_tensor = data_train
         valid_x_tensor, valid_v_tensor, valid_dv_tensor = data_valid
         self._setup_optimizer()
-        logger.info("Starting network training session") if self.verbose else None
+        if self.verbose:
+            logger.debug("Output-weight training")
+            logger.debug("  %-6s %-14s %-14s", "step", "train loss", "val loss")
         
         # Reset loss history
         self.loss_history = {'train_loss': [], 'val_loss': [], 'value_loss': [], 'grad_loss': []}
@@ -517,7 +522,7 @@ class SignedModel:
             # log the loss
             if epoch % display_every == 0:
                 if self.verbose:
-                    logger.info(f"Epoch {epoch}: Train Loss = {loss.item():.6f}, "f"Val Loss = {val_loss.item():.6f}")
+                    logger.debug("  %6d %-14.6e %-14.6e", epoch, loss.item(), val_loss.item())
                 self.loss_history['train_loss'].append(loss.item())
                 self.loss_history['val_loss'].append(val_loss.item())
                 self.loss_history['value_loss'].append(val_value_loss.item())
@@ -526,7 +531,15 @@ class SignedModel:
         
         # Restore the best model before returning and report best loss
         self.net.load_state_dict(best_state)
+        self.last_fit_summary = {
+            "best_step": best_epoch,
+            "best_train_loss": best_train_loss,
+            "successful_steps": successful_steps,
+        }
         if self.verbose:
-            logger.info(f"Best validation loss: {best_val_loss:.6f} at iteration {best_epoch}")
+            logger.debug(
+                "Output-weight solve complete  best_inner_step=%d  best_train_loss=%.6e",
+                best_epoch, best_train_loss,
+            )
 
         return successful_steps > 0
