@@ -202,9 +202,10 @@ def profile_threshold(
         accepted_b = [accepted_b[i] for i in order]
 
     if verbose:
-        logger.info(
-            f"insertion: tried {N}, after merge {n_after}, "
-            f"accepted {len(accepted_a)} (cap <={max_insert}, alpha={alpha})"
+        logger.debug(
+            "Candidate search  sampled=%d  unique=%d  accepted=%d/%d  "
+            "rule=residual correlation above alpha (alpha=%.2e)",
+            N, n_after, len(accepted_a), max_insert, alpha,
         )
 
     if len(accepted_a) == 0:
@@ -316,9 +317,10 @@ def finite_step(
         accepted_c = [accepted_c[i] for i in order]
 
     if verbose:
-        logger.info(
-            f"insertion: tried {N}, after merge {n_after}, "
-            f"accepted {len(accepted_a)} (cap <={max_insert}, alpha={alpha}, q={q:.3f})"
+        logger.debug(
+            "Candidate search  sampled=%d  unique=%d  accepted=%d/%d  "
+            "rule=adding atom reduces objective (alpha=%.2e, q=%.3f)",
+            N, n_after, len(accepted_a), max_insert, alpha, q,
         )
 
     if len(accepted_a) == 0:

@@ -72,6 +72,7 @@ class SemiconcaveModel:
         self.affine_w: torch.Tensor | None = None  # (d,)
         self.affine_b: float = 0.0
         self.input_dim: int | None = None
+        self.last_fit_summary = {}
 
     def _prepare_data(self, data: dict):
         """Split a data dict into (train, valid) tensor tuples (x, V, dV).
@@ -362,6 +363,16 @@ class SemiconcaveModel:
         if n > 0:
             self.c = self.c.clamp_min(0.0)
         self.C = max(self.C, 0.0)
+        self.last_fit_summary = {
+            "best_step": iterations - 1,
+            "best_train_loss": prev,
+            "successful_steps": iterations if made_progress else 0,
+            "curvature": self.C,
+            "total_atom_weight": float(self.c.abs().sum()) if n > 0 else 0.0,
+        }
         if self.verbose:
-            logger.info(f"semiconcave SSN: C={self.C:.4e}, |c| sum={float(self.c.abs().sum()) if n>0 else 0:.4e}")
+            logger.debug(
+                "Semiconcave fit   curvature=%.4e  total atom weight=%.4e",
+                self.C, float(self.c.abs().sum()) if n > 0 else 0.0,
+            )
         return made_progress
