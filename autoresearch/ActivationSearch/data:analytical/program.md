@@ -5,7 +5,7 @@ a discontinuous gradient from `notebook/pdpa_vdp.ipynb` Experiment 3.
 
 ## Fixed Study
 
-Use `PDPA_v2` with:
+Use signed-profile PDAP (`model="signed"`, `insertion="profile"`) with:
 
 - `power=1`
 - `loss="h1"`

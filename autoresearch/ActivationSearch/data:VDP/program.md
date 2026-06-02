@@ -6,9 +6,10 @@ this file, agent runs the loop.
 
 ## The study
 
-For each activation we train `PDPA_v2` with `power=1`, `loss="h1"`, the gamma
-list `[0, 1e-2, 1e-1, 1, 10]`, and the rest of the hyperparameters from
-`notebook/pdpa_v3_vdp.ipynb` (`alpha=1e-5`, `num_iterations=10`,
+For each activation we train signed-profile PDAP (`model="signed"`,
+`insertion="profile"`) with `power=1`, `loss="h1"`, the gamma list
+`[0, 1e-2, 1e-1, 1, 10]`, and the rest of the hyperparameters from
+`notebook/pdpa_vdp.ipynb` (`alpha=1e-5`, `num_iterations=10`,
 `num_insertion=50`, `pruning_threshold=1e-5`). For each `(activation, seed)` we
 take the gamma that minimizes
 

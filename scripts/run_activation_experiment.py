@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run one (activation, seed) experiment for the activation-search study.
 
-Sweeps the fixed gamma list with PDPA_v2 (power=1, loss=h1), then prints a
+Sweeps the fixed gamma list with signed-profile PDAP (power=1, loss=h1), then prints a
 single JSON line on stdout summarizing per-gamma results and the best score
 score := err_h1_val[best_iteration] * best_neurons.
 """
@@ -22,7 +22,7 @@ import torch.nn.functional as F
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from src.PDAP import from_alias
+from src.PDAP import PDAP
 from src.activations import matern52
 from src.experiment_logging import RunRecordWriter
 from src.logging_config import configure_logging
@@ -386,9 +386,9 @@ def main() -> int:
     t0 = time.time()
     for gamma in GAMMAS:
         set_seed(args.seed)
-        pdpa = from_alias(
-            "v2",
+        pdpa = PDAP(
             data=data, alpha=ALPHA, gamma=gamma, power=POWER,
+            model="signed", insertion="profile",
             activation=activation_fn, use_sphere=use_sphere,
             loss_weights=LOSS_WEIGHTS, verbose=False,
         )

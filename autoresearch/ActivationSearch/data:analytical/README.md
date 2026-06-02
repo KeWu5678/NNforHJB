@@ -19,7 +19,7 @@ V(x1, x2) = x1^2 + x2^2 + c * abs(h(x1, x2)),  c = 1
 Training uses the same 30x30 grid as the notebook. The runner imports the
 existing activation registry, with `gaussian` overridden to the notebook's
 `exp(-z^2/2)` definition. Scoring is done on a denser analytic evaluation grid,
-so the result is not tied to the one-point validation split inside `PDPA_v2`.
+so the result is not tied to the one-point validation split inside the PDAP run.
 
 ## Layout
 

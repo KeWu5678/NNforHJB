@@ -172,7 +172,7 @@ def test_activation_runners_use_shared_run_record_writer():
 def test_pendulum_model_comparison_writes_standard_run_record(tmp_path):
     script = load_script_module("run_pendulum_model_comparison", "scripts/run_pendulum_model_comparison.py")
     summary = {
-        "model": "v2",
+        "model": "signed_profile",
         "activation": "relu",
         "seed": 42,
         "dataset": "pmp",
@@ -182,10 +182,10 @@ def test_pendulum_model_comparison_writes_standard_run_record(tmp_path):
 
     script.write_outputs(tmp_path, summary)
 
-    path = tmp_path / "v2_relu_seed42.json"
+    path = tmp_path / "signed_profile_relu_seed42.json"
     record = json.loads(path.read_text(encoding="utf-8"))
-    assert record["model"] == "v2"
+    assert record["model"] == "signed_profile"
     assert record["dataset"] == "pmp"
     assert record["status"] == "ok"
     assert record["name"] == "pendulum_model_comparison"
-    assert record["run_id"] == "v2_relu_seed42"
+    assert record["run_id"] == "signed_profile_relu_seed42"
