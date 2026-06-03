@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -euxo pipefail
+
+# Bootstrap the MLflow tracking server in an isolated virtualenv and run it
+# under systemd. Logs go to the journal (journalctl -u mlflow).
+
+dnf update -y
+dnf install -y python3 python3-pip
+
+python3 -m venv /opt/mlflow/venv
+/opt/mlflow/venv/bin/pip install --upgrade pip
+%{ if mlflow_version != "" ~}
+/opt/mlflow/venv/bin/pip install "mlflow==${mlflow_version}" boto3
+%{ else ~}
+/opt/mlflow/venv/bin/pip install mlflow boto3
+%{ endif ~}
+
+cat > /etc/systemd/system/mlflow.service <<'UNIT'
+[Unit]
+Description=MLflow tracking server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/opt/mlflow/venv/bin/mlflow server --host 127.0.0.1 --port ${mlflow_port} --backend-store-uri sqlite:////opt/mlflow/mlflow.db --serve-artifacts --artifacts-destination s3://${artifact_bucket}
+Restart=always
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+systemctl daemon-reload
+systemctl enable --now mlflow.service
