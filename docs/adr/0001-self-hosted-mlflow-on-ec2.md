@@ -12,8 +12,9 @@ exposure — the server binds to localhost on the instance and is reached only b
 SSM port-forwarding to `http://localhost:5000`. We chose this over managed and
 production-grade alternatives because the project is a single-researcher thesis
 where cost and debuggability outweigh managed convenience and scale, and because
-durable central storage (not multi-user serving) is the only stage-1
-requirement.
+the stage-1 requirement is a central comparison dashboard (not multi-user
+serving) — full run data stays local, as detailed under "What lives where"
+below.
 
 **Implementation status: proposed, not yet deployed.** Terraform for this
 topology lives on the `mlflow-deployment-plan` branch (`deploy/terraform/`) but
