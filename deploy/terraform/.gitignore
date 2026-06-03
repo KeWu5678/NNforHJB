@@ -1,0 +1,13 @@
+# Terraform local state and caches — never commit these.
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+
+# tfvars may carry account-specific values; keep them out of git.
+*.tfvars
+*.tfvars.json
+!example.tfvars
+
+# Keep the provider lock file (.terraform.lock.hcl) tracked.
