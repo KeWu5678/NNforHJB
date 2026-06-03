@@ -39,17 +39,28 @@ the module is applied and the server is reachable.
 
 ## Consequences
 
-### Two durability tiers — not one
+### What lives where (no single "durable central" tier)
 
-- **Durable:** Run Artifacts in S3 (including `result.pkl`, the reproducible
-  model) and the local JSON Run Records. These survive instance stop/start,
-  replacement, and `terraform destroy`.
-- **Not durable across the instance lifecycle:** the SQLite backend store on the
-  EBS root volume. It survives stop/start, but is **lost on instance replacement
-  or `terraform destroy`**. Treat it as a rebuildable UI/query index over the
-  durable records, not as the source of truth. If MLflow-UI run history must
-  survive a destroy/recreate, that is a separate decision (periodic
-  SQLite → S3 backup, or a retained data volume) to be recorded when needed.
+- **Local, on the training machine — the source of truth.** The local JSON Run
+  Records and the full `result_<point>.pkl` (per-iteration curves + weights) are
+  written next to the run and are **not** copied to S3. They are durable on that
+  machine but are *not* centrally durable; per
+  [ADR-0002](0002-mlflow-as-run-record-backend.md) the pickle is referenced from
+  MLflow only by a `result_pickle` tag (a pointer), not stored centrally.
+- **S3 artifact store — only what MLflow explicitly logs.** The server is
+  configured to proxy artifacts to S3, but the current adapter logs only params,
+  metrics, and tags — **no artifacts** — so S3 holds no result data today. It
+  covers only files passed to `mlflow.log_artifact` (none yet; future plots, if
+  any). S3 itself is durable across `terraform destroy`.
+- **Central but instance-lifecycle:** the MLflow summary metrics/params/tags in
+  the SQLite backend store on the EBS root volume. This is what makes the
+  comparison dashboard central. It survives stop/start, but is **lost on instance
+  replacement or `terraform destroy`** — treat it as a rebuildable index, not the
+  source of truth. If that history must survive a destroy/recreate, that is a
+  separate decision (periodic SQLite → S3 backup, or a retained data volume).
+- **Net:** what is centrally available is the *comparison summary*, not the full
+  results. Full results stay local by choice; this narrows the original
+  "durable central store" goal to "central comparison + local results."
 - The Terraform sets `user_data_replace_on_change = false` so that editing the
   bootstrap script does not silently replace the instance and discard the SQLite
   store; bootstrap changes are re-applied manually (or by an explicit taint).

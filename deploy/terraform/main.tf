@@ -4,16 +4,32 @@
 # See docs/adr/0001-self-hosted-mlflow-on-ec2.md.
 # ---------------------------------------------------------------------------
 
-# --- Networking: the account's default VPC (no inbound is opened anyway) ---
+# --- Networking ---
+# When var.subnet_id is set, derive everything from that subnet's VPC (no
+# default VPC required); otherwise fall back to the account's default VPC. The
+# security group is created in whichever VPC the instance lands in, so a custom
+# subnet in a non-default VPC works.
 data "aws_vpc" "default" {
+  count   = var.subnet_id == null ? 1 : 0
   default = true
 }
 
 data "aws_subnets" "default" {
+  count = var.subnet_id == null ? 1 : 0
   filter {
     name   = "vpc-id"
-    values = [data.aws_vpc.default.id]
+    values = [data.aws_vpc.default[0].id]
   }
+}
+
+data "aws_subnet" "selected" {
+  count = var.subnet_id == null ? 0 : 1
+  id    = var.subnet_id
+}
+
+locals {
+  subnet_id = var.subnet_id != null ? var.subnet_id : data.aws_subnets.default[0].ids[0]
+  vpc_id    = var.subnet_id != null ? data.aws_subnet.selected[0].vpc_id : data.aws_vpc.default[0].id
 }
 
 # --- Latest Amazon Linux 2023 AMI (SSM Agent preinstalled) ---
@@ -117,7 +133,7 @@ resource "aws_iam_instance_profile" "mlflow" {
 resource "aws_security_group" "mlflow" {
   name        = "${var.project}-mlflow"
   description = "MLflow server: no inbound, reached via SSM only"
-  vpc_id      = data.aws_vpc.default.id
+  vpc_id      = local.vpc_id
 
   egress {
     description = "All outbound (SSM endpoints, S3, package installs)"
@@ -135,7 +151,7 @@ resource "aws_security_group" "mlflow" {
 resource "aws_instance" "mlflow" {
   ami                    = data.aws_ssm_parameter.al2023.value
   instance_type          = var.instance_type
-  subnet_id              = var.subnet_id != null ? var.subnet_id : data.aws_subnets.default.ids[0]
+  subnet_id              = local.subnet_id
   iam_instance_profile   = aws_iam_instance_profile.mlflow.name
   vpc_security_group_ids = [aws_security_group.mlflow.id]
 
