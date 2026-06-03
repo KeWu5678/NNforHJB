@@ -11,7 +11,7 @@ import logging
 import torch
 import os
 from ..SSN import SSN
-from ..net import ShallowNetwork
+from .net import ShallowNetwork
 from ..utils import _phi, _phi_prox
 
 logger = logging.getLogger(__name__)
@@ -139,38 +139,28 @@ class SignedModel:
                 raise ValueError("input_dim is not set. Call _prepare_data() before training or pass inner_weights.")
             input_dim = int(self.input_dim)
 
-        if self.train_outerweights == False:
-            if inner_weights is None:
-                # Default case - will be handled by ShallowNetwork, create a network with 30 neurons
-                n = 30
-            else:
-                # Number of neurons is the first dimension for PyTorch
-                n = inner_weights.shape[0]
-                if self.verbose:
-                    logger.debug("Network support  atoms=%d", n)
-        
-        # Create the shallow network
-            self.net = ShallowNetwork(
-                [input_dim, n, 1], 
-                self.activation,
-                p=self.power, 
-                inner_weights=inner_weights, inner_bias=inner_bias, outer_weights=outer_weights
-            )
+        if inner_weights is None:
+            # Default case - no atoms provided, create a network with 30 neurons
+            n = 30
         else:
-            if inner_weights is None:
-                n = 30 # same as above
-            else:
-                n = inner_weights.shape[0]
-            self.net = ShallowNetwork(
-                [input_dim, n, 1], 
-                self.activation, 
-                p=self.power, 
-                inner_weights=inner_weights, inner_bias=inner_bias, outer_weights=outer_weights
-            )
+            # Number of neurons is the first dimension for PyTorch
+            n = inner_weights.shape[0]
+            if self.verbose:
+                logger.debug("Network support  atoms=%d", n)
+
+        # Create the shallow network
+        self.net = ShallowNetwork(
+            [input_dim, n, 1],
+            self.activation,
+            p=self.power,
+            inner_weights=inner_weights, inner_bias=inner_bias, outer_weights=outer_weights
+        )
+
+        if self.train_outerweights:
             # Freeze hidden layer so only output weights are trainable
             self.net.hidden.weight.requires_grad = False
             self.net.hidden.bias.requires_grad = False
-        
+
     
     def _setup_optimizer(self) -> None:
         """Setup the optimizer based on optimizer type."""

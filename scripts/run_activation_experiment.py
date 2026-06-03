@@ -26,6 +26,7 @@ from src.PDAP import PDAP
 from src.activations import matern52
 from src.experiment_logging import RunRecordWriter
 from src.logging_config import configure_logging
+from src.paths import DATA_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -331,7 +332,7 @@ LOSS_WEIGHTS = "h1"
 NUM_ITERATIONS = 10
 NUM_INSERTION = 50
 PRUNING_THRESHOLD = 1e-5
-DATA_PATH = REPO_ROOT / "rawdata/data/VDP_beta_0.1_grid_30x30.npy"
+DATA_PATH = DATA_DIR / "VDP_beta_0.1_grid_30x30.npy"
 
 RUN_RECORD = RunRecordWriter(
     REPO_ROOT,

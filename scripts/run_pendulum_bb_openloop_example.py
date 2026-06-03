@@ -14,6 +14,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.OpenLoop.pendulum.bb_generator import PendulumBBDataGenerator  # noqa: E402
+from src.paths import DATA_DIR  # noqa: E402
 
 
 def parse_point(raw: str) -> np.ndarray:
@@ -103,7 +104,7 @@ def main() -> None:
             print(f"value range: {dataset['v'][finite].min():.6e} to {dataset['v'][finite].max():.6e}")
 
     if args.save:
-        output_dir = REPO_ROOT / "rawdata" / "raw_data" / "data"
+        output_dir = DATA_DIR
         data_path, failed_path = generator.data_save(
             dataset,
             failed,

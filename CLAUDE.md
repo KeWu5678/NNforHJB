@@ -67,10 +67,12 @@ PDAP outer loop (`PDAP.fit`, 15–20 iters):
 - `insertion="profile"` (dual-threshold) | `"finite_step"` (ΔJ<0, for q<1).
 - Aliases: `v2`=signed+profile, `v1`=semiconcave+profile, `v3`=signed+finite_step.
 
-Modules (`src/`): `net.py`, `utils.py`, `metric.py`, the `src/SSN/` optimizer
-package, the `src/models/` model package, the `src/PDAP/` outer-loop package, plus
-the open-loop data subsystem in `src/OpenLoop/` (solvers, the pendulum PMP sampler,
-and the VDP / pendulum dataset generators).
+Modules (`src/`): `utils.py`, `metric.py` (table/summary helpers),
+`plot_value_function.py` (all reusable plotting helpers), `paths.py` (centralized
+output dirs — `PLOTS_DIR`/`LOGS_DIR`/`DATA_DIR`), the `src/SSN/` optimizer package,
+the `src/models/` model package, the `src/PDAP/` outer-loop package, plus the
+open-loop data subsystem in `src/OpenLoop/` (solvers, the pendulum PMP sampler, and
+the VDP / pendulum dataset generators).
 
 The **`src/SSN/` package** is one configurable semismooth-Newton optimizer
 (layout mirrors `torch.optim`): `optimizer.py` (`SSN`), `strategies.py`
@@ -83,9 +85,12 @@ configurations of this single class — the former `ssn.py`/`ssn_tr.py`/
 
 The **`src/models/` package** holds the parametric value-function models behind a
 shared `Model` protocol (`base.py`): `signed.py` (`SignedModel`) and
-`semiconcave.py` (`SemiconcaveModel`). Both expose the uniform interface the loop
-drives — `set_atoms`/`get_atoms`/`warm_start`/`fit_outer_weights`/`predict_tensors`.
-The former `model.py`/`semiconcave_model.py` no longer exist.
+`semiconcave.py` (`SemiconcaveModel`), plus `net.py` (`ShallowNetwork`, the
+low-level torch `nn.Module` that `SignedModel` is built on; `SemiconcaveModel`
+parameterizes its own features instead). Both models expose the uniform interface
+the loop drives — `set_atoms`/`get_atoms`/`warm_start`/`fit_outer_weights`/
+`predict_tensors`. The former `model.py`/`semiconcave_model.py` no longer exist;
+`net.py` moved here from `src/`.
 
 The **`src/PDAP/` package** is the unified outer loop: `pdap.py` (`PDAP` + `fit`),
 `insertion.py` (`profile_threshold` / `finite_step` strategies + `solve_insertion_weight`),

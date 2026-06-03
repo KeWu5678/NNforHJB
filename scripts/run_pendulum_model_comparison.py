@@ -52,7 +52,8 @@ from scripts.run_discontinuous_activation_experiment import ACTIVATIONS, set_see
 from src.PDAP import PDAP  # noqa: E402
 from src.experiment_logging import RunRecordWriter  # noqa: E402
 from src.logging_config import configure_logging  # noqa: E402
-from src.net import ShallowNetwork  # noqa: E402
+from src.models.net import ShallowNetwork  # noqa: E402
+from src.paths import DATA_DIR  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +91,7 @@ DEFAULT_OUTPUT_DIR = (
     / "data: pendulum"
     / "extended_semiconcave_runs"
 )
-DATA_DIR = REPO_ROOT / "rawdata" / "raw_data" / "data"
+# Datasets are read from the central data directory (see src/paths.py).
 
 # Physical pendulum constants, identical for both generators
 # (PendulumPmpParameters and PendulumSwingUpProblem defaults).

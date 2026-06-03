@@ -27,6 +27,7 @@ from src.OpenLoop.pendulum.pmp_sampler import (  # noqa: E402
     PendulumPmpParameters,
     PendulumPmpSampler,
 )
+from src.paths import DATA_DIR, PLOTS_DIR  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -57,8 +58,8 @@ def parse_args() -> argparse.Namespace:
         choices=("min-value", "center"),
         default="min-value",
     )
-    parser.add_argument("--output-dir", type=Path, default=REPO_ROOT / "rawdata/data")
-    parser.add_argument("--plot-dir", type=Path, default=REPO_ROOT / "rawdata/plots")
+    parser.add_argument("--output-dir", type=Path, default=DATA_DIR)
+    parser.add_argument("--plot-dir", type=Path, default=PLOTS_DIR)
     parser.add_argument("--tag", type=str, default=None)
     parser.add_argument("--no-plot", action="store_true")
     parser.add_argument("--plot-subsample", type=int, default=40000)

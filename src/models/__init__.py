@@ -6,7 +6,8 @@ Each model represents V(x) and conforms to the :class:`base.Model` protocol:
 """
 
 from .base import Model
+from .net import ShallowNetwork
 from .signed import SignedModel
 from .semiconcave import SemiconcaveModel
 
-__all__ = ["Model", "SignedModel", "SemiconcaveModel"]
+__all__ = ["Model", "ShallowNetwork", "SignedModel", "SemiconcaveModel"]
