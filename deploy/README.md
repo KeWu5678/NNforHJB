@@ -1,7 +1,9 @@
 # MLflow deployment
 
-Self-hosted MLflow tracking server on AWS for durable, central experiment
-storage. The design and its trade-offs are recorded in
+Self-hosted MLflow tracking server on AWS providing a **central comparison
+dashboard** (params, metrics, tags). Full run data — the local JSON Run Records
+and `result_<point>.pkl` curves/weights — stays on the training machine; S3
+holds no result data today. The design and its trade-offs are recorded in
 [`docs/adr/0001-self-hosted-mlflow-on-ec2.md`](../docs/adr/0001-self-hosted-mlflow-on-ec2.md).
 
 ```
@@ -89,6 +91,7 @@ sqlite3 /opt/mlflow/mlflow.db .tables
 terraform destroy
 ```
 
-The S3 bucket has versioning enabled; if `destroy` refuses to delete a
-non-empty bucket, empty it first (`aws s3 rm s3://<bucket> --recursive`) or
-delete it via the console.
+The artifact bucket is created with `force_destroy = true`, so `terraform
+destroy` empties it (including all object versions) and removes it cleanly. This
+is safe because the bucket holds no source-of-truth data (see ADR-0001); drop
+`force_destroy` if you ever store data there you want to protect from teardown.

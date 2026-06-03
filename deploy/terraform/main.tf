@@ -47,6 +47,11 @@ resource "random_id" "bucket_suffix" {
 
 resource "aws_s3_bucket" "artifacts" {
   bucket = "${var.artifact_bucket_prefix}-${random_id.bucket_suffix.hex}"
+
+  # Safe here: per ADR-0001 the source of truth is local, not S3, so this bucket
+  # is disposable. force_destroy lets `terraform destroy` empty it (including all
+  # object versions) instead of failing on a non-empty versioned bucket.
+  force_destroy = true
 }
 
 resource "aws_s3_bucket_public_access_block" "artifacts" {
