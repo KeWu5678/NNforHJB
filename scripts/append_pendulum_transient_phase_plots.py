@@ -451,10 +451,10 @@ import numpy as np
 
 repo = Path("..").resolve()
 tag = "{TAG}"
-data_path = repo / "rawdata/raw_data/data" / f"PENDULUM_transient_openloop_{{tag}}.npy"
-failed_path = repo / "rawdata/raw_data/data" / f"PENDULUM_transient_openloop_failed_{{tag}}.json"
-diagnostics_path = repo / "rawdata/raw_data/data" / f"PENDULUM_transient_openloop_diagnostics_{{tag}}.json"
-meta_path = repo / "rawdata/raw_data/data" / f"PENDULUM_transient_openloop_{{tag}}_meta.json"
+data_path = repo / "rawdata/data" / f"PENDULUM_transient_openloop_{{tag}}.npy"
+failed_path = repo / "rawdata/data" / f"PENDULUM_transient_openloop_failed_{{tag}}.json"
+diagnostics_path = repo / "rawdata/data" / f"PENDULUM_transient_openloop_diagnostics_{{tag}}.json"
+meta_path = repo / "rawdata/data" / f"PENDULUM_transient_openloop_{{tag}}_meta.json"
 
 pendulum_data = np.load(data_path)
 pendulum_failed = json.loads(failed_path.read_text())
