@@ -331,7 +331,7 @@ LOSS_WEIGHTS = "h1"
 NUM_ITERATIONS = 10
 NUM_INSERTION = 50
 PRUNING_THRESHOLD = 1e-5
-DATA_PATH = REPO_ROOT / "rawdata/raw_data/data/VDP_beta_0.1_grid_30x30.npy"
+DATA_PATH = REPO_ROOT / "rawdata/data/VDP_beta_0.1_grid_30x30.npy"
 
 RUN_RECORD = RunRecordWriter(
     REPO_ROOT,
