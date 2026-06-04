@@ -6,7 +6,7 @@ A run = pick a registered model + a data source, override the rest::
     python scripts/train.py model=semiconcave model.gamma=10
     python scripts/train.py -m model.gamma=0,1e-2,1e-1,1,10 env.seed=42,43,44
 
-This entry is domain-agnostic — it loads a ``.npy`` with keys ``x, v, dv`` and
+This entry is domain-agnostic — it loads a ``.npy``/``.npz`` with keys ``x, v, dv`` and
 fits the PDAP model described by the config. The default ``data=vdp`` reproduces a
 single VDP signed-profile run.
 """
@@ -54,7 +54,7 @@ def set_seed(seed: int) -> None:
 
 
 def load_dataset(path: Path) -> dict:
-    """Load a value/gradient dataset (any ``.npy`` with keys ``x, v, dv``)."""
+    """Load a value/gradient dataset with ``x``, ``v``, and ``dv`` arrays."""
     raw = np.load(path, allow_pickle=True)
     return {
         "x": np.asarray(raw["x"], dtype=np.float64),

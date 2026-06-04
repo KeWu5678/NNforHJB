@@ -1,6 +1,20 @@
-"""VDP open-loop data generation."""
+"""VDP smooth open-loop data generation."""
 
-from src.OpenLoop.vdp.generator import DataGenerator
-from src.OpenLoop.vdp.phase_capture import VdpPhaseCaptureProblem, solve_phase_capture_sample
+from src.OpenLoop.vdp.problem import VdpOptimalControlProblem
+from src.OpenLoop.vdp.sampling import grid_initial_states, random_initial_states
+from src.OpenLoop.vdp.solver import (
+    VdpOpenLoopSolution,
+    VdpOpenLoopSolver,
+    VdpOpenLoopSolverConfig,
+    VdpSampleResult,
+)
 
-__all__ = ["DataGenerator", "VdpPhaseCaptureProblem", "solve_phase_capture_sample"]
+__all__ = [
+    "VdpOpenLoopSolution",
+    "VdpOpenLoopSolver",
+    "VdpOpenLoopSolverConfig",
+    "VdpOptimalControlProblem",
+    "VdpSampleResult",
+    "grid_initial_states",
+    "random_initial_states",
+]
