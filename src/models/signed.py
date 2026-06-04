@@ -31,9 +31,14 @@ class SignedModel:
         lr: float = 1.0,
         loss_weights: Tuple[float, float] = (1.0, 1.0), 
         th: float = 0.5,
-        training_percentage: float = 0.9,  
+        training_percentage: float = 0.9,
         verbose: bool = True,
-        train_outerweights: bool = False
+        train_outerweights: bool = False,
+        method: Optional[str] = None,
+        max_ls_iter: int = 500,
+        tolerance_ls: float = 1.0 + 1e-8,
+        tolerance_grad: float = 0.0,
+        sigmamax: float = 10.0,
         ) -> None:
         """
         Args:
@@ -60,6 +65,12 @@ class SignedModel:
         self.verbose = verbose
         # network parameters
         self.train_outerweights = train_outerweights
+        # SSN solver settings (default to today's literals)
+        self.method = method
+        self.max_ls_iter = max_ls_iter
+        self.tolerance_ls = tolerance_ls
+        self.tolerance_grad = tolerance_grad
+        self.sigmamax = sigmamax
         self.input_dim: Optional[int] = None
         
         # Initialize training components
@@ -167,9 +178,17 @@ class SignedModel:
         if self.optimizer_type in ["SSN", "SSN_TR"]:
             if self.train_outerweights == True:
                 output_params = [self.net.output.weight]
-                # SSN_TR folded into SSN as the trust-region (Steihaug-CG) method.
-                method = "steihaug_cg" if self.optimizer_type == "SSN_TR" else "levenberg_marquardt"
-                self.optimizer = SSN(output_params, alpha=self.alpha, gamma=self.gamma, th=self.th, lr=self.lr, power=self.power, method=method)
+                # SSN_TR folded into SSN as the trust-region (Steihaug-CG) method;
+                # an explicit configured method overrides the optimizer_type shorthand.
+                method = self.method or (
+                    "steihaug_cg" if self.optimizer_type == "SSN_TR" else "levenberg_marquardt"
+                )
+                self.optimizer = SSN(
+                    output_params, alpha=self.alpha, gamma=self.gamma, th=self.th,
+                    lr=self.lr, power=self.power, method=method,
+                    max_ls_iter=self.max_ls_iter, tolerance_ls=self.tolerance_ls,
+                    tolerance_grad=self.tolerance_grad, sigmamax=self.sigmamax,
+                )
                 if self.verbose:
                     logger.debug(
                         "Output-weight solver  method=%s  alpha=%.2e  gamma=%.2e  penalty_mix=%.2f  lr=%.2g",

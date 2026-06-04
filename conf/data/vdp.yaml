@@ -1,0 +1,2 @@
+# Data source: Van der Pol value/gradient grid (resolved relative to DATA_DIR).
+path: VDP_beta_0.1_grid_30x30.npy

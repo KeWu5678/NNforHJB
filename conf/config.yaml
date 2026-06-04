@@ -1,0 +1,20 @@
+# Top-level composition. A run = pick a model + a data source, override the rest.
+#
+#   python scripts/train.py model=semiconcave model.gamma=10
+#   python scripts/train.py -m model.gamma=0,1e-2,1e-1,1,10 env.seed=42,43,44
+#
+# `training` and `env` defaults live inline below; override them ad hoc
+# (e.g. training.num_iterations=20).
+
+defaults:
+  - config_schema      # typed base (src/config/store.py) — validates everything below
+  - model: signed      # conf/model/<name>.yaml — THE MODEL REGISTRY
+  - data: vdp          # conf/data/<name>.yaml   — the data source
+  - _self_
+
+name: run
+
+hydra:
+  job:
+    # Keep CWD = repo root so src.paths (REPO_ROOT-relative) keeps working.
+    chdir: false

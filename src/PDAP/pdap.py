@@ -45,6 +45,20 @@ class PDAP:
         use_sphere: bool = True,
         c_init: float = 1.0,
         verbose: bool = True,
+        # SSN solver settings (defaults = today's literals)
+        solver_method: str = "levenberg_marquardt",
+        max_ls_iter: int = 500,
+        tolerance_ls: float = 1.0 + 1e-8,
+        tolerance_grad: float = 0.0,
+        sigmamax: float = 10.0,
+        fit_outer_iterations: int = 20,
+        display_every: int = 2,
+        # insertion numeric constants (defaults = today's literals)
+        ins_merge_tol: float = 1e-2,
+        lbfgs_lr: float = 1e-2,
+        lbfgs_steps: int = 200,
+        newton_tol: float = 1e-12,
+        newton_max_iter: int = 50,
     ) -> None:
         if model not in ("signed", "semiconcave"):
             raise ValueError(f"model must be 'signed' or 'semiconcave', got {model!r}")
@@ -64,6 +78,18 @@ class PDAP:
         self.activation_fn = activation
         self._use_sphere = bool(use_sphere)
         self.verbose = verbose
+        # outer-loop + insertion settings (threaded into fit / _insert)
+        self.fit_outer_iterations = int(fit_outer_iterations)
+        self.display_every = int(display_every)
+        self.ins_merge_tol = float(ins_merge_tol)
+        self.lbfgs_lr = float(lbfgs_lr)
+        self.lbfgs_steps = int(lbfgs_steps)
+        self.newton_tol = float(newton_tol)
+        self.newton_max_iter = int(newton_max_iter)
+        _solver_kwargs = dict(
+            method=solver_method, max_ls_iter=max_ls_iter, tolerance_ls=tolerance_ls,
+            tolerance_grad=tolerance_grad, sigmamax=sigmamax,
+        )
 
         # histories
         self.train_loss: List[float] = []
@@ -85,6 +111,7 @@ class PDAP:
                 alpha=alpha, gamma=gamma, optimizer="SSN", activation=activation,
                 power=power, lr=lr, loss_weights=loss_weights, th=th, verbose=verbose,
                 train_outerweights=True, training_percentage=(N_total - 1) / N_total,
+                **_solver_kwargs,
             )
             self.data_train, self.data_valid = self.model._prepare_data(data)
         else:
@@ -93,6 +120,7 @@ class PDAP:
             self.model = SemiconcaveModel(
                 alpha=alpha, gamma=gamma, power=power, th=th, activation=activation,
                 loss_weights=loss_weights, lr=lr, c_init=c_init, verbose=verbose,
+                **_solver_kwargs,
             )
             self.data_train, self.data_valid = self.model._prepare_data(data)
             self.model._ensure_affine(int(self.model.input_dim))
@@ -113,6 +141,49 @@ class PDAP:
             logger.info("  | %-16s | %-24.2e |", "gamma", self.model.gamma)
             logger.info("  | %-16s | %-24.3g |", "activation power", self.model.power)
             logger.info("  +------------------+--------------------------+")
+
+    # ------------------------------------------------------------------ #
+    # Construction / run from a structured config
+    # ------------------------------------------------------------------ #
+    @classmethod
+    def from_config(cls, cfg, data: dict) -> "PDAP":
+        """Build a PDAP from an ``ExperimentConfig`` (or composed ``DictConfig``).
+
+        Resolves the activation name to a callable and derives ``use_sphere`` from
+        the activation's geometry (unless ``model.use_sphere`` is set explicitly),
+        then threads the model + training sections into ``__init__``.
+        """
+        from ..config.activations import get_activation
+
+        m, t = cfg.model, cfg.training
+        spec = get_activation(m.activation)
+        use_sphere = spec.use_sphere if m.use_sphere is None else bool(m.use_sphere)
+        return cls(
+            data,
+            alpha=m.alpha, gamma=m.gamma, power=m.power,
+            model=m.kind, insertion=m.insertion,
+            activation=spec.fn, loss_weights=m.loss_weights,
+            lr=t.lr, th=m.th, use_sphere=use_sphere, c_init=m.c_init,
+            verbose=cfg.env.verbose,
+            solver_method=t.method, max_ls_iter=t.max_ls_iter,
+            tolerance_ls=t.tolerance_ls, tolerance_grad=t.tolerance_grad,
+            sigmamax=t.sigmamax, fit_outer_iterations=t.fit_outer_iterations,
+            display_every=t.display_every,
+            ins_merge_tol=t.ins_merge_tol, lbfgs_lr=t.lbfgs_lr, lbfgs_steps=t.lbfgs_steps,
+            newton_tol=t.newton_tol, newton_max_iter=t.newton_max_iter,
+        )
+
+    def fit_from_config(self, training, *, verbose: bool = True) -> dict:
+        """Run :meth:`fit` using a ``TrainingConfig`` section."""
+        return self.fit(
+            num_iterations=training.num_iterations,
+            num_insertion=training.num_insertion,
+            threshold=training.threshold,
+            max_insert=training.max_insert,
+            merge_tol=training.prune_merge_tol,
+            decorrelation=training.decorrelation,
+            verbose=verbose,
+        )
 
     # ------------------------------------------------------------------ #
     # Shared helpers
@@ -208,11 +279,9 @@ class PDAP:
     # ------------------------------------------------------------------ #
     # Insertion dispatch (residuals + existing support read from the model)
     # ------------------------------------------------------------------ #
-    # The insertion-candidate merge tolerance is independent of the prune
-    # tolerance: insertion uses its own default 1e-2
-    # while passing retrain's merge_tol (default 1e-3) only to prune_small_weights.
-    INSERTION_MERGE_TOL = 1e-2
-
+    # The insertion-candidate merge tolerance (self.ins_merge_tol, default 1e-2) is
+    # independent of the prune tolerance (fit's merge_tol, default 1e-3, used only
+    # in prune_small_weights).
     def _insert(self, num_insertion: int, max_insert: int, verbose: bool):
         """Return (W, b, c) where c is None for the profile strategy (needs warm-start)."""
         X, V, dV = self.data_train
@@ -235,13 +304,17 @@ class PDAP:
             activation=self.activation_fn, power=self.model.power,
             loss_weights=self.model.loss_weights, alpha=self.alpha,
             sample_sphere=self.sample_uniform_sphere_points, N=num_insertion,
-            max_insert=max_insert, merge_tol=self.INSERTION_MERGE_TOL,
+            max_insert=max_insert, merge_tol=self.ins_merge_tol,
             use_sphere=self._use_sphere, existing_atoms=existing, verbose=verbose,
+            lbfgs_lr=self.lbfgs_lr, lbfgs_steps=self.lbfgs_steps,
         )
         if self.insertion_kind == "profile":
             W, b = profile_threshold(X, res_v, res_dv, two_sided=self.two_sided, **common)
             return W, b, None
-        W, b, c = finite_step(X, res_v, res_dv, **common)
+        W, b, c = finite_step(
+            X, res_v, res_dv,
+            newton_tol=self.newton_tol, newton_max_iter=self.newton_max_iter, **common,
+        )
         return W, b, c
 
     # ------------------------------------------------------------------ #
@@ -292,7 +365,10 @@ class PDAP:
             supp_before = self.model.n_neurons
 
             # 1. SSN on outer weights (inner weights frozen)
-            self.model.fit_outer_weights(self.data_train, self.data_valid, iterations=20, display_every=2)
+            self.model.fit_outer_weights(
+                self.data_train, self.data_valid,
+                iterations=self.fit_outer_iterations, display_every=self.display_every,
+            )
             fit_summary = getattr(self.model, "last_fit_summary", {})
 
             # 2. prune: merge duplicates + remove zeros

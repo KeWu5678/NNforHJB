@@ -1,0 +1,8 @@
+# Registered model: semiconcave envelope V = 0.5*C||x||^2 - g(x), profile insertion.
+# (= registry.py ALIASES["semiconcave"])
+kind: semiconcave
+insertion: profile
+activation: relu
+power: 1.0
+loss_weights: h1
+c_init: 1.0

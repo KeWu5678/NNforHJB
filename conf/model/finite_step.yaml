@@ -1,0 +1,8 @@
+# Registered model: signed network with finite-step insertion (q<1 penalty).
+# (= registry.py ALIASES["finite_step"])
+# finite-step needs q = 2/(power+1) < 1, i.e. power > 1, so it defaults higher.
+kind: signed
+insertion: finite_step
+activation: relu
+power: 2.0
+loss_weights: h1

@@ -1,0 +1,7 @@
+# Registered model: signed shallow network with profile insertion.
+# (= registry.py ALIASES["signed"])
+kind: signed
+insertion: profile
+activation: relu
+power: 1.0
+loss_weights: h1
