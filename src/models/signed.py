@@ -11,8 +11,9 @@ import logging
 import torch
 import os
 from ..SSN import SSN
+from ..SSN.penalty import _phi
+from ..SSN.prox import _phi_prox
 from .net import ShallowNetwork
-from ..utils import _phi, _phi_prox
 
 logger = logging.getLogger(__name__)
 

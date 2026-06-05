@@ -23,7 +23,8 @@ import numpy as np
 import torch
 
 from ..SSN import SSN
-from ..utils import _phi, _phi_prox
+from ..SSN.penalty import _phi
+from ..SSN.prox import _phi_prox
 
 logger = logging.getLogger(__name__)
 
