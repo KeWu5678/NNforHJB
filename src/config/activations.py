@@ -20,12 +20,23 @@ from typing import Callable
 import torch
 import torch.nn.functional as F
 
-from ..activations import matern52
-
 
 # ---------------------------------------------------------------------------- #
 # Helper builders
 # ---------------------------------------------------------------------------- #
+def matern52(z: torch.Tensor) -> torch.Tensor:
+    """Matern 5/2 activation function.
+
+    k(z) = (1 + sqrt(5)|z| + 5/3 * z^2) * exp(-sqrt(5)|z|)
+
+    This activation is smooth and non-negative, but it is not positively
+    homogeneous, so its registry entry must use ``use_sphere=False``.
+    """
+    r = torch.abs(z)
+    sqrt5 = 2.23606797749979
+    return (1.0 + sqrt5 * r + (5.0 / 3.0) * r.pow(2)) * torch.exp(-sqrt5 * r)
+
+
 def swish_beta(beta: float):
     return lambda x: x * torch.sigmoid(beta * x)
 
@@ -347,4 +358,4 @@ def get_activation(name: str) -> ActivationSpec:
     return ActivationSpec(name=name, fn=fn, use_sphere=bool(use_sphere))
 
 
-__all__ = ["ACTIVATIONS", "ActivationSpec", "get_activation"]
+__all__ = ["ACTIVATIONS", "ActivationSpec", "get_activation", "matern52"]
