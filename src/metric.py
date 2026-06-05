@@ -1,16 +1,69 @@
 """Table / summary helpers for experiment results.
 
-All figure-producing helpers live in ``src/plot_value_function.py``; this
+All figure-producing helpers live in ``src/plots.py``; this
 module keeps only the tabular summaries plus the shared result-loading
 helper (``_load_results``) that the plotting module imports.
 """
 
 from __future__ import annotations
-from typing import Any, Sequence
+from typing import Any, Callable, Mapping, Sequence
 from pathlib import Path
 import os
 import pickle
 import numpy as np
+
+
+def _stringify_cell(value: Any, formatter: str | Callable[[Any], str] | None = None) -> str:
+    if formatter is None:
+        if isinstance(value, float):
+            return f"{value:.3g}"
+        return str(value)
+    if isinstance(formatter, str):
+        return formatter.format(value)
+    return formatter(value)
+
+
+def format_table(
+    rows: Sequence[Mapping[str, Any]],
+    columns: Sequence[str],
+    *,
+    headers: Mapping[str, str] | None = None,
+    formats: Mapping[str, str | Callable[[Any], str]] | None = None,
+    title: str | None = None,
+) -> str:
+    """Return a compact Markdown table.
+
+    This intentionally avoids pandas.  It is for small experiment summaries that
+    should be easy to read in terminals, Markdown files, and notebooks.
+    """
+    headers = headers or {}
+    formats = formats or {}
+    labels = [headers.get(col, col) for col in columns]
+    body = [
+        [_stringify_cell(row.get(col, ""), formats.get(col)) for col in columns]
+        for row in rows
+    ]
+    widths = [
+        max(len(labels[i]), *(len(row[i]) for row in body)) if body else len(labels[i])
+        for i in range(len(columns))
+    ]
+
+    def line(values: Sequence[str]) -> str:
+        return "| " + " | ".join(values[i].ljust(widths[i]) for i in range(len(values))) + " |"
+
+    sep = "| " + " | ".join("-" * widths[i] for i in range(len(columns))) + " |"
+    parts = []
+    if title:
+        parts.extend([title, ""])
+    parts.append(line(labels))
+    parts.append(sep)
+    parts.extend(line(row) for row in body)
+    return "\n".join(parts)
+
+
+def print_table(*args, **kwargs) -> None:
+    """Print :func:`format_table` output."""
+    print(format_table(*args, **kwargs))
 
 
 def _load_results(results: Sequence[dict] | str | os.PathLike[str]) -> list[dict]:
@@ -117,27 +170,33 @@ def summarize_final_neuron_count_and_loss(
         "best_err_h1": best_err_h1_arr,
     }
 
-    try:
-        import pandas as pd  # type: ignore
-
-        data_dict: dict[str, Any] = {
-            "best_neurons": best_neurons_arr,
-            loss_col: best_losses_arr,
+    rows = []
+    for idx, gamma in enumerate(gammas):
+        row: dict[str, Any] = {
+            "gamma": float(gamma),
+            "best_neurons": best_neurons_arr[idx],
+            loss_col: best_losses_arr[idx],
         }
-        if np.any(np.isfinite(best_err_l2_arr)):
-            data_dict["err_l2"] = best_err_l2_arr
-        if np.any(np.isfinite(best_err_h1_arr)):
-            data_dict["err_h1"] = best_err_h1_arr
-
-        df = pd.DataFrame(data_dict, index=[f"gamma={g:g}" for g in gammas])
-        df_fmt = df.copy()
-        df_fmt["best_neurons"] = df_fmt["best_neurons"].map(lambda v: f"{v:.0f}" if np.isfinite(v) else "nan")
-        df_fmt[loss_col] = df_fmt[loss_col].map(lambda v: f"{v:.2e}" if np.isfinite(v) else "nan")
-        for col in ("err_l2", "err_h1"):
-            if col in df_fmt.columns:
-                df_fmt[col] = df_fmt[col].map(lambda v: f"{v:.2e}" if np.isfinite(v) else "nan")
-        result["table_df"] = df_fmt
-    except Exception:
-        pass
+        if np.isfinite(best_err_l2_arr[idx]):
+            row["err_l2"] = best_err_l2_arr[idx]
+        if np.isfinite(best_err_h1_arr[idx]):
+            row["err_h1"] = best_err_h1_arr[idx]
+        rows.append(row)
+    columns = ["gamma", "best_neurons", loss_col]
+    if any("err_l2" in row for row in rows):
+        columns.append("err_l2")
+    if any("err_h1" in row for row in rows):
+        columns.append("err_h1")
+    result["table"] = format_table(
+        rows,
+        columns,
+        formats={
+            "gamma": "{:g}",
+            "best_neurons": lambda v: "nan" if not np.isfinite(v) else f"{v:.0f}",
+            loss_col: "{:.2e}",
+            "err_l2": "{:.2e}",
+            "err_h1": "{:.2e}",
+        },
+    )
 
     return result

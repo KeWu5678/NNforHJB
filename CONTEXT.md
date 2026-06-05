@@ -26,6 +26,16 @@ pendulum use different algorithms, but both emit final `(x, V(x), dV(x))`
 samples through this contract.
 _Avoid_: Treating solver internals or raw trajectories as shared sample data
 
+**PDAP Algorithm**:
+The sparse approximation procedure that alternates neuron insertion, outer-weight
+optimization, pruning, and model evaluation against value samples.
+_Avoid_: PDPA, PDAD, treating historical PDPA_v* labels as current names
+
+**PDAP Model Configuration**:
+A concrete PDAP run configuration composed from a model family, insertion rule,
+activation, loss weighting, regularization, and SSN solver settings.
+_Avoid_: Version-number model names, naive PDAP algorithm
+
 **Fixed-Target Value**:
 The smooth value function obtained by fixing one terminal target in a multi-target control problem. A multi-target value is the pointwise minimum of two or more fixed-target values.
 _Avoid_: Branch, mode, class, label
@@ -85,6 +95,15 @@ configuration, status, timing, metrics, and artifact paths needed to reproduce
 or compare the run.
 _Avoid_: Treating console progress or free-form text logs as the experiment
 source of truth
+
+**Experiment**:
+A named research question and result presentation that may include one or more
+sweeps, runs, datasets, summaries, and figures.
+_Avoid_: Using it for one config point, using it for an uncurated notebook
+
+**Sweep**:
+An executable parameter grid or search under an experiment.
+_Avoid_: Experiment, run
 
 **Console Progress**:
 Human-facing status emitted while a script is running. It helps monitor a run
