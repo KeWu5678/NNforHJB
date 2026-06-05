@@ -93,8 +93,12 @@ Reference implementation: `/Users/ruizhechao/Documents/NonConvexSparseNN/`
     (trust-region MPCG) globalizations, selected by `method=`.
   - `prox.py`, `penalty.py` — proximal / penalty kernels (re-exported by `utils.py`).
   - `mpcg.py` — projected/trust-region CG inner solve for `steihaug_cg`.
-- `utils.py` — re-exports the `SSN` penalty/proximal kernels (`_phi`/`_dphi`/`_ddphi`, `_compute_prox`/`_compute_dprox`/`_phi_prox`, `_penalty_grad`, `_nonconvex_correction*`), plus stereographic projection and misc helpers.
+- `utils.py` — legacy compatibility re-exports for the `SSN` penalty/proximal kernels (`_phi`/`_dphi`/`_ddphi`, `_compute_prox`/`_compute_dprox`/`_phi_prox`, `_penalty_grad`, `_nonconvex_correction*`).
 - `metric.py` — experiment-analysis utilities (per-gamma neuron/loss tables, plots).
+- `config/` — Hydra structured configuration for PDAP training:
+  - `schema.py` — typed model/training/data/env config objects.
+  - `activations.py` — canonical activation registry used by configs and scripts.
+  - `store.py` — registers the Hydra `config_schema`.
 - Open-loop data subsystem: `src/OpenLoop/` — shared `ValueSamples`, VDP smooth
   data generation under `src/OpenLoop/vdp/`, and paper-backed infinite-horizon
   pendulum data generation under `src/OpenLoop/pendulum/`.
@@ -103,6 +107,7 @@ Reference implementation: `/Users/ruizhechao/Documents/NonConvexSparseNN/`
 
 | script | role |
 |--------|------|
+| `train.py` | Hydra entry point for PDAP training on key-based value/gradient datasets |
 | `run_activation_experiment.py` | base activation registry + VDP-HJB activation search |
 | `run_discontinuous_activation_experiment.py` | discontinuous-gradient activation search (extends `ACTIVATIONS`, `set_seed`) |
 | `run_pendulum_pmp_openloop_example.py` | generate PMP backward-sampler pendulum dataset (infinite-horizon) |
@@ -115,5 +120,6 @@ Reference implementation: `/Users/ruizhechao/Documents/NonConvexSparseNN/`
 ```
 VDP / pendulum data generator -> dict {x, v, dv} -> PDAP(model=, insertion=).fit() -> results
 ```
+Training data may be a legacy key-based `.npy` file or a newer `.npz` file; both must expose `x`, `v`, and `dv` arrays.
 VDP experiments: `notebook/pdpa_vdp.ipynb` (pickles in `models/experiment_N/`).
 Activation/model studies: `scripts/*` -> `autoresearch/*`.

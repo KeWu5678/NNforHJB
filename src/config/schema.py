@@ -5,7 +5,8 @@ Four sections compose into :class:`ExperimentConfig`:
   * ``model``    — a registered model: structure + insertion rule + hyperparameters.
   * ``training`` — how the model is fit: outer PDAP loop + SSN solver + insertion
     numeric constants.
-  * ``data``     — the data source (a ``.npy`` path with keys ``x, v, dv``).
+  * ``data``     — the data source (a key-based ``.npy``/``.npz`` path with
+    arrays ``x``, ``v``, and ``dv``).
   * ``env``      — runtime: seed + logging.
 
 Every default equals the value currently in force for the VDP signed-profile
@@ -79,9 +80,11 @@ class TrainingConfig:
 
 @dataclass
 class DataConfig:
-    """The data source: a ``.npy`` with keys ``x, v, dv``.
+    """The data source: a key-based ``.npy`` or ``.npz`` with ``x``, ``v``, ``dv``.
 
     ``path`` is resolved relative to ``DATA_DIR`` (absolute paths allowed).
+    The default points at the existing legacy VDP ``.npy``; new OpenLoop
+    generators save ``.npz`` files with the same keys.
     PDAP splits train/validation internally, so no split knob is needed here.
     """
 

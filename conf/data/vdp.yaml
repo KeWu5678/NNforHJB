@@ -1,2 +1,3 @@
-# Data source: Van der Pol value/gradient grid (resolved relative to DATA_DIR).
+# Data source: legacy Van der Pol value/gradient grid, resolved relative to DATA_DIR.
+# The loader also accepts newer OpenLoop .npz files with x, v, and dv arrays.
 path: VDP_beta_0.1_grid_30x30.npy
