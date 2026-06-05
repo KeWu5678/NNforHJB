@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -15,9 +16,13 @@ from scipy.interpolate import RegularGridInterpolator
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from src.paths import DATA_DIR, PLOTS_DIR  # noqa: E402
+
 TAG = "real_31x31_T3_tol1e-5_workers8"
-DATA_DIR = REPO_ROOT / "rawdata" / "raw_data" / "data"
-PLOT_DIR = REPO_ROOT / "rawdata" / "raw_data" / "plots" / TAG / "transient_phase_clean"
+PLOT_DIR = PLOTS_DIR / TAG / "transient_phase_clean"
 NOTEBOOK_PATH = REPO_ROOT / "notebook" / "openloop.ipynb"
 
 DATA_PATH = DATA_DIR / f"PENDULUM_transient_openloop_{TAG}.npy"

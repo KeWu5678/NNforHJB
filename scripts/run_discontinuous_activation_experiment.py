@@ -27,7 +27,7 @@ from scripts.run_activation_experiment import ACTIVATIONS as BASE_ACTIVATIONS  #
 from src.PDAP import PDAP  # noqa: E402
 from src.experiment_logging import RunRecordWriter  # noqa: E402
 from src.logging_config import configure_logging  # noqa: E402
-from src.net import ShallowNetwork  # noqa: E402
+from src.models.net import ShallowNetwork  # noqa: E402
 
 logger = logging.getLogger(__name__)
 

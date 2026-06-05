@@ -1,6 +1,7 @@
 import math
 import numpy as np
 import scipy.special as sp
+from numpy.polynomial import legendre as npleg
 from numpy.polynomial.chebyshev import Chebyshev
 from scipy.spatial import KDTree
 import torch
@@ -90,15 +91,13 @@ def L2(grid, x):
             L2 norm of x
     """
     
-    if len(grid) != len(x):
+    grid = np.asarray(grid, dtype=float)
+    x = np.asarray(x, dtype=float)
+    if grid.shape[0] != x.shape[0]:
         raise ValueError("grid and x must have the same size")
-    else:
-        n = len(grid)
-    norm = 0
-    for i in range(n - 1):
-        mesh = grid[i + 1] - grid[i]
-        norm += mesh * (x[i] ** 2)
-    return norm
+    # Left-Riemann sum of x**2 over the (non-uniform) grid mesh.
+    mesh = np.diff(grid)
+    return float(np.dot(mesh, x[:-1] ** 2))
 
 def remove_duplicates(points, tolerance=1e-3):
     """
@@ -127,28 +126,17 @@ def gen_legendre(coefficients, domain=(0, 3)):
     Returns:
         function: A function that evaluates the Legendre expansion at any point t
     """
-    n = len(coefficients)
+    coefficients = np.asarray(coefficients, dtype=float)
     a, b = domain
-    
+    # Precompute the affine map t -> (2t - (a+b)) / (b-a) onto Legendre's [-1, 1].
+    scale = 2.0 / (b - a)
+    shift = (a + b) / (b - a)
+
     def func(t):
-        # Map from custom domain to [-1, 1] which is the standard domain for Legendre polynomials
-        t_mapped = (2*t - (a+b)) / (b-a)
-        
-        # Handle arrays properly
-        if isinstance(t, np.ndarray):
-            result = np.zeros_like(t, dtype=float)
-            for i in range(n):
-                P_i = sp.legendre(i)
-                result += coefficients[i] * P_i(t_mapped)
-            return result
-        else:
-            # Evaluate the sum of Legendre polynomials with given coefficients
-            result = 0.0
-            for i in range(n):
-                P_i = sp.legendre(i)
-                result += coefficients[i] * P_i(t_mapped)
-            return result
-    
+        # legval sums coefficients[i] * P_i in one vectorized C call and handles
+        # both scalar and array inputs, so no Python-level loop is needed.
+        return npleg.legval(scale * np.asarray(t, dtype=float) - shift, coefficients)
+
     return func
 
 def fit_legendre(x_data, y_data, n, domain=(0, 3), report_error=False):
@@ -170,14 +158,11 @@ def fit_legendre(x_data, y_data, n, domain=(0, 3), report_error=False):
     
     # Map data to standard Legendre domain [-1, 1]
     a, b = domain
-    x_mapped = (2*x_data - (a+b)) / (b-a)
-    
-    # Create design matrix A where A[i,j] = P_j(x_i)
-    A = np.zeros((len(x_data), n))
-    for j in range(n):
-        P_j = sp.legendre(j)
-        A[:, j] = P_j(x_mapped)
-    
+    x_mapped = (2 * np.asarray(x_data, dtype=float) - (a + b)) / (b - a)
+
+    # Vandermonde matrix A[i, j] = P_j(x_i), built in one vectorized call.
+    A = npleg.legvander(x_mapped, n - 1)
+
     # Solve the least squares problem: min ||A*coeffs - y_data||^2
     coeffs, residuals, rank, s = np.linalg.lstsq(A, y_data, rcond=None)
     

@@ -16,6 +16,7 @@ if str(REPO_ROOT) not in sys.path:
 from src.OpenLoop.pendulum.finite_horizon_generator import (  # noqa: E402
     PendulumFiniteHorizonDataGenerator,
 )
+from src.paths import DATA_DIR  # noqa: E402
 
 
 def parse_point(raw: str) -> np.ndarray:
@@ -102,7 +103,7 @@ def main() -> None:
     checkpoint_dir = None
     checkpoint_tag = None
     if args.checkpoint_every > 0:
-        checkpoint_dir = REPO_ROOT / "rawdata" / "raw_data" / "data"
+        checkpoint_dir = DATA_DIR
         checkpoint_tag = args.tag or "pendulum_transient"
 
     dataset, failed, diagnostics = generator.data_generation_parallel(
@@ -121,7 +122,7 @@ def main() -> None:
         print(f"max accepted residual_l2_squared: {max_residual:.6e}")
 
     if args.save:
-        output_dir = REPO_ROOT / "rawdata" / "raw_data" / "data"
+        output_dir = DATA_DIR
         data_path, failed_path, diagnostics_path = generator.data_save(
             dataset,
             failed,
