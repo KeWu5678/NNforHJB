@@ -2,11 +2,8 @@
 """Compare semiconcave-profile and signed-profile PDAP on pendulum swing-up data.
 
 This mirrors the semiconcave-reference autoresearch procedure
-(``run_semiconcave_model_comparison.py``) but trains on the *sampled* pendulum
-datasets instead of an analytic target:
-
-  * PMP backward-sampler grid (infinite-horizon true value), and/or
-  * transient reduced-gradient BFGS grid (finite-horizon T=3).
+(``run_semiconcave_model_comparison.py``) but trains on sampled
+infinite-horizon pendulum PMP value samples instead of an analytic target.
 
 Key pendulum-specific adaptations:
 
@@ -25,8 +22,7 @@ Key pendulum-specific adaptations:
   * Metrics. rel_value / rel_grad / rel_h1 / neuron count, plus the pendulum
     stationary-HJB residual (physical units) and a data-driven switching-set
     metric (near/far gradient error around grid cells where the true gradient
-    jumps). For the finite-horizon transient dataset the stationary-HJB
-    residual is diagnostic only -- it is not expected to vanish.
+    jumps).
 """
 
 from __future__ import annotations
@@ -93,8 +89,7 @@ DEFAULT_OUTPUT_DIR = (
 )
 # Datasets are read from the central data directory (see src/paths.py).
 
-# Physical pendulum constants, identical for both generators
-# (PendulumPmpParameters and PendulumSwingUpProblem defaults).
+# Physical pendulum constants matching PendulumSwingUpProblem defaults.
 PENDULUM_PHYS = {
     "control_gain": 1.0,   # c = 1 / (m l^2)
     "damping_gain": 0.1,   # d = b / (m l^2)
@@ -106,11 +101,8 @@ PENDULUM_PHYS = {
 
 DATASETS = {
     "pmp": "PENDULUM_pmp_openloop_train_grid_80x80_512_pendulum_train_v1.npy",
-    "transient": "PENDULUM_transient_openloop_real_31x31_T3_tol1e-5_workers8.npy",
 }
-# Whether the stationary-HJB residual is meaningful (infinite-horizon) or just
-# diagnostic (finite-horizon).
-HJB_IS_STATIONARY = {"pmp": True, "transient": False}
+HJB_IS_STATIONARY = {"pmp": True}
 RUN_RECORD = RunRecordWriter(
     DEFAULT_OUTPUT_DIR,
     name="pendulum_model_comparison",
@@ -480,7 +472,7 @@ def build_context(dataset_name: str, args: argparse.Namespace) -> dict[str, Any]
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--datasets", default="pmp,transient", help="comma-separated subset of pmp,transient")
+    parser.add_argument("--datasets", default="pmp", help="comma-separated subset of pmp")
     parser.add_argument("--models", default="semiconcave_profile,signed_profile",
                         help="comma-separated subset of semiconcave_profile,signed_profile")
     parser.add_argument("--activation", default="leaky_relu")

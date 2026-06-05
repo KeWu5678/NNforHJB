@@ -68,6 +68,7 @@ def _generate_candidates(
     X, residual_v, residual_dv, *,
     activation, power, loss_weights, sample_sphere, N,
     merge_tol, two_sided, use_sphere, existing_atoms,
+    lbfgs_lr=1e-2, lbfgs_steps=200,
 ) -> Tuple[torch.Tensor, torch.Tensor, int]:
     """Return (a_t, b_t, n_after_merge): distinct dual-profile maximisers on S^d."""
     K, d_dim = X.shape
@@ -130,7 +131,7 @@ def _generate_candidates(
     # Step 2: iterative optimize + merge (MATLAB find_max:390-414).
     n_after = a_t.shape[0]
     for _ in range(5):
-        a_t, b_t = maximize_batch(a_t, b_t, steps=200)
+        a_t, b_t = maximize_batch(a_t, b_t, steps=lbfgs_steps, lr=lbfgs_lr)
         n_before = a_t.shape[0]
         a_t, b_t = merge(a_t, b_t)
         n_after = a_t.shape[0]
@@ -171,6 +172,7 @@ def profile_threshold(
     activation, power, loss_weights, alpha, sample_sphere, N,
     max_insert=15, merge_tol=1e-2, two_sided=True, use_sphere=True,
     existing_atoms=None, verbose=True,
+    lbfgs_lr=1e-2, lbfgs_steps=200,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Accept atoms whose (unnormalised) dual profile exceeds ``alpha``."""
     K, d_dim = X.shape
@@ -181,7 +183,7 @@ def profile_threshold(
         X, residual_v, residual_dv, activation=activation, power=power,
         loss_weights=loss_weights, sample_sphere=sample_sphere, N=N,
         merge_tol=merge_tol, two_sided=two_sided, use_sphere=use_sphere,
-        existing_atoms=existing_atoms,
+        existing_atoms=existing_atoms, lbfgs_lr=lbfgs_lr, lbfgs_steps=lbfgs_steps,
     )
 
     accepted_a: List[torch.Tensor] = []
@@ -274,6 +276,7 @@ def finite_step(
     activation, power, loss_weights, alpha, sample_sphere, N,
     max_insert=15, merge_tol=1e-2, use_sphere=True,
     existing_atoms=None, verbose=True,
+    lbfgs_lr=1e-2, lbfgs_steps=200, newton_tol=1e-12, newton_max_iter=50,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Accept atoms with a profitable finite step (Delta J(c*) < 0); return c* too."""
     K, d_dim = X.shape
@@ -285,7 +288,7 @@ def finite_step(
         X, residual_v, residual_dv, activation=activation, power=power,
         loss_weights=loss_weights, sample_sphere=sample_sphere, N=N,
         merge_tol=merge_tol, two_sided=True, use_sphere=use_sphere,
-        existing_atoms=existing_atoms,
+        existing_atoms=existing_atoms, lbfgs_lr=lbfgs_lr, lbfgs_steps=lbfgs_steps,
     )
 
     res_v_flat = residual_v.reshape(-1)
@@ -302,7 +305,10 @@ def finite_step(
             S_grad = neuron_dv.detach().reshape(-1)
             p_omega = float((w1 / Kx) * S_val.dot(res_v_flat) + (w2 / Kx) * S_grad.dot(res_dv_flat))
             S_sq = float((w1 / Kx) * S_val.dot(S_val) + (w2 / Kx) * S_grad.dot(S_grad))
-            result = solve_insertion_weight(p_omega, S_sq, alpha, q)
+            result = solve_insertion_weight(
+                p_omega, S_sq, alpha, q,
+                newton_tol=newton_tol, max_iter=newton_max_iter,
+            )
             if result is not None:
                 c_star, dJ = result
                 accepted_a.append(a_i.detach())

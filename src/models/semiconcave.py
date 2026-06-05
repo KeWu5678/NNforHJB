@@ -23,7 +23,8 @@ import numpy as np
 import torch
 
 from ..SSN import SSN
-from ..utils import _phi, _phi_prox
+from ..SSN.penalty import _phi
+from ..SSN.prox import _phi_prox
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,11 @@ class SemiconcaveModel:
         c_init: float = 1.0,
         verbose: bool = True,
         dtype: torch.dtype = torch.float64,
+        method: str = "levenberg_marquardt",
+        max_ls_iter: int = 500,
+        tolerance_ls: float = 1.0 + 1e-8,
+        tolerance_grad: float = 0.0,
+        sigmamax: float = 10.0,
     ) -> None:
         if power < 1.0:
             raise ValueError("semiconcave model requires a convex atom: power >= 1")
@@ -57,6 +63,12 @@ class SemiconcaveModel:
         self.verbose = verbose
         self.dtype = dtype
         self.optimizer_type = "SSN_semiconcave"
+        # SSN solver settings (default to today's literals)
+        self.method = method
+        self.max_ls_iter = max_ls_iter
+        self.tolerance_ls = tolerance_ls
+        self.tolerance_grad = tolerance_grad
+        self.sigmamax = sigmamax
 
         if isinstance(loss_weights, str):
             mapping = {"l2": (1.0, 0.0), "h1": (1.0, 1.0)}
@@ -334,6 +346,9 @@ class SemiconcaveModel:
             [theta], alpha=self.alpha, gamma=self.gamma,
             penalized_mask=penalized, nonneg_mask=nonneg,
             th=self.th, lr=self.lr, power=self.power,
+            method=self.method, max_ls_iter=self.max_ls_iter,
+            tolerance_ls=self.tolerance_ls, tolerance_grad=self.tolerance_grad,
+            sigmamax=self.sigmamax,
         )
         optimizer.data_hessian = H
 

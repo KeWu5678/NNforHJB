@@ -21,7 +21,7 @@ import pytest
 import torch
 
 from src.SSN import SSN
-from src.utils import _phi
+from src.SSN.penalty import _phi
 
 GOLDEN_PATH = Path(__file__).parent / "fixtures" / "ssn_golden.npz"
 N_STEPS = 6
