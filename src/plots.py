@@ -884,7 +884,7 @@ def plot_loss_vs_neurons_by_gamma(
 ) -> Tuple[plt.Figure, plt.Axes]:
     """Plot best-so-far metric vs neuron count over iterations.
 
-    One line per gamma.  At each PDPA iteration *t* the plotted point is:
+    One line per gamma.  At each PDAP iteration *t* the plotted point is:
       x = neuron count at iteration t
       y = min(metric_hist[:t+1])
 
