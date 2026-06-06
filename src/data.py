@@ -20,6 +20,8 @@ from typing import Any
 
 import numpy as np
 
+from .paths import DATA_DIR
+
 
 ValueSamples = dict[str, np.ndarray]
 
@@ -53,8 +55,13 @@ def _as_value_samples(raw: Any) -> ValueSamples:
 
 
 def load_value_samples(path: str | Path) -> ValueSamples:
-    """Load a ``.npy``/``.npz`` value-sample file."""
-    raw = np.load(Path(path), allow_pickle=True)
+    """Load a ``.npy``/``.npz`` value-sample file.
+
+    ``path`` resolves under :data:`src.paths.DATA_DIR`; an absolute ``path`` is
+    used unchanged (``DATA_DIR / abs`` returns ``abs``). This is the single place
+    data paths are resolved — callers pass a bare filename, not a built path.
+    """
+    raw = np.load(DATA_DIR / path, allow_pickle=True)
     return _as_value_samples(raw)
 
 

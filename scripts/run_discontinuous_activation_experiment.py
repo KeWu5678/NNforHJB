@@ -25,6 +25,7 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.run_activation_experiment import ACTIVATIONS as BASE_ACTIVATIONS  # noqa: E402
 from src.PDAP import PDAP  # noqa: E402
+from src.config.schema import EnvConfig, ExperimentConfig, ModelConfig, TrainingConfig  # noqa: E402
 from src.experiment_logging import RunRecordWriter  # noqa: E402
 from src.logging_config import configure_logging  # noqa: E402
 from src.models.net import ShallowNetwork  # noqa: E402
@@ -34,10 +35,9 @@ logger = logging.getLogger(__name__)
 GAMMAS = [0, 1e-2, 1e-1, 1, 10]
 ALPHA = 1e-5
 POWER = 1.0
-LOSS_WEIGHTS = "h1"
+LOSS_WEIGHTS = (1.0, 1.0)
 NUM_ITERATIONS = 10
 NUM_INSERTION = 50
-PRUNING_THRESHOLD = 1e-5
 C_JUMP = 1.0
 
 
@@ -46,7 +46,7 @@ def gaussian_notebook(z: torch.Tensor) -> torch.Tensor:
 
 
 ACTIVATIONS = dict(BASE_ACTIVATIONS)
-ACTIVATIONS["gaussian"] = (gaussian_notebook, False)
+ACTIVATIONS["gaussian"] = gaussian_notebook
 
 RUN_RECORD = RunRecordWriter(
     REPO_ROOT,
@@ -73,9 +73,6 @@ def set_seed(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
 
 
 def value_and_gradient(x: np.ndarray, c_jump: float = C_JUMP) -> tuple[np.ndarray, np.ndarray]:
@@ -189,10 +186,12 @@ def main() -> int:
     parser.add_argument("--train-grid-size", type=int, default=30)
     parser.add_argument("--eval-grid-size", type=int, default=61)
     parser.add_argument("--c-jump", type=float, default=C_JUMP)
+    parser.add_argument("--use-sphere", action="store_true",
+                        help="sample candidate directions on S^d (only for positively-homogeneous activations)")
     parser.add_argument("--output-dir", type=Path, default=None)
     args = parser.parse_args()
 
-    activation_fn, use_sphere = ACTIVATIONS[args.activation]
+    activation_fn = ACTIVATIONS[args.activation]
     train_data, _ = make_grid(args.train_grid_size, c_jump=args.c_jump)
     eval_data, eval_dist = make_grid(args.eval_grid_size, c_jump=args.c_jump)
 
@@ -200,22 +199,19 @@ def main() -> int:
     start = time.time()
     for gamma in GAMMAS:
         set_seed(args.seed)
-        pdpa = PDAP(
-            data=train_data,
-            alpha=ALPHA,
-            gamma=gamma,
-            power=POWER,
-            model="signed",
-            insertion="profile",
-            activation=activation_fn,
-            use_sphere=use_sphere,
-            loss_weights=LOSS_WEIGHTS,
-            verbose=False,
+        cfg = ExperimentConfig(
+            model=ModelConfig(
+                kind="signed", insertion="profile", activation=args.activation,
+                power=POWER, loss_weights=tuple(LOSS_WEIGHTS), use_sphere=args.use_sphere,
+                alpha=ALPHA, gamma=gamma,
+            ),
+            training=TrainingConfig(num_iterations=args.num_iterations, num_insertion=args.num_insertion),
+            env=EnvConfig(verbose=False),
         )
+        pdpa = PDAP(cfg, train_data)
         result = pdpa.fit(
             num_iterations=args.num_iterations,
             num_insertion=args.num_insertion,
-            threshold=PRUNING_THRESHOLD,
             verbose=False,
         )
         best_iteration = int(result["best_iteration"])
@@ -245,7 +241,7 @@ def main() -> int:
         "num_insertion": args.num_insertion,
         "power": POWER,
         "loss": LOSS_WEIGHTS,
-        "use_sphere": use_sphere,
+        "use_sphere": args.use_sphere,
         "c_jump": args.c_jump,
         "train_grid_size": args.train_grid_size,
         "eval_grid_size": args.eval_grid_size,

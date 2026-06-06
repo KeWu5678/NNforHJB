@@ -4,5 +4,5 @@ kind: semiconcave
 insertion: profile
 activation: relu
 power: 1.0
-loss_weights: h1
+loss_weights: [1.0, 1.0]   # [w1, w2] = [value, gradient]; l2 = [1.0, 0.0]
 c_init: 1.0

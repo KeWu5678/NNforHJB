@@ -23,16 +23,27 @@ import pytest
 import torch
 
 from src.PDAP import PDAP
+from src.config.schema import EnvConfig, ExperimentConfig, ModelConfig, TrainingConfig
 
 GOLDEN_PATH = Path(__file__).parent / "fixtures" / "pdap_golden.npz"
 SEED = 123
 RTOL, ATOL = 1e-5, 1e-7
 
 CONFIGS = {
-    "signed_profile": {"model": "signed", "insertion": "profile"},
-    "semiconcave_profile": {"model": "semiconcave", "insertion": "profile"},
-    "signed_finite_step": {"model": "signed", "insertion": "finite_step"},
+    "signed_profile": {"kind": "signed", "insertion": "profile"},
+    "semiconcave_profile": {"kind": "semiconcave", "insertion": "profile"},
+    "signed_finite_step": {"kind": "signed", "insertion": "finite_step"},
 }
+
+
+def _cfg(name: str) -> ExperimentConfig:
+    c = CONFIGS[name]
+    return ExperimentConfig(
+        model=ModelConfig(kind=c["kind"], insertion=c["insertion"],
+                          power=1.0, alpha=1e-4, gamma=0.1),
+        training=TrainingConfig(),
+        env=EnvConfig(verbose=False),
+    )
 
 
 def _make_data(n: int = 60, seed: int = 0) -> dict:
@@ -53,10 +64,7 @@ def _run_summary(name: str) -> np.ndarray:
     """Run one variant for a short loop; return [final_neurons, l2, h1, last_loss]."""
     torch.manual_seed(SEED)
     np.random.seed(SEED)
-    pdap = PDAP(
-        _make_data(), alpha=1e-4, gamma=0.1, power=1.0,
-        verbose=False, **CONFIGS[name],
-    )
+    pdap = PDAP(_cfg(name), _make_data())
     out = pdap.fit(num_iterations=3, num_insertion=20, verbose=False)
     return np.array(
         [

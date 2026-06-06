@@ -46,6 +46,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from scripts.run_discontinuous_activation_experiment import ACTIVATIONS, set_seed  # noqa: E402
 from src.PDAP import PDAP  # noqa: E402
+from src.config.schema import EnvConfig, ExperimentConfig, ModelConfig, TrainingConfig  # noqa: E402
 from src.experiment_logging import RunRecordWriter  # noqa: E402
 from src.logging_config import configure_logging  # noqa: E402
 from src.models.net import ShallowNetwork  # noqa: E402
@@ -265,25 +266,19 @@ def train_semiconcave_profile(train_norm, eval_norm, eval_x_phys, scales, sw_dis
     """Semiconcave model with profile-threshold insertion."""
     set_seed(seed)
     start = time.time()
-    pdpa = PDAP(
-        data=train_norm,
-        alpha=args.alpha,
-        gamma=gamma,
-        power=args.power,
-        model="semiconcave",
-        insertion="profile",
-        activation=args.activation_fn,
-        loss_weights="h1",
-        lr=args.pdap_lr,
-        th=args.th,
-        use_sphere=args.use_sphere,
-        c_init=args.c_init,
-        verbose=False,
+    cfg = ExperimentConfig(
+        model=ModelConfig(
+            kind="semiconcave", insertion="profile", activation=args.activation_name,
+            power=args.power, loss_weights=(1.0, 1.0), use_sphere=args.use_sphere,
+            c_init=args.c_init, alpha=args.alpha, gamma=gamma, th=args.th,
+        ),
+        training=TrainingConfig(lr=args.pdap_lr),
+        env=EnvConfig(verbose=False),
     )
+    pdpa = PDAP(cfg, train_norm)
     result = pdpa.fit(
         num_iterations=args.num_iterations,
         num_insertion=args.num_insertion,
-        threshold=args.threshold,
         max_insert=args.max_insert,
         verbose=False,
     )
@@ -312,24 +307,19 @@ def train_signed_profile(train_norm, eval_norm, eval_x_phys, scales, sw_distance
                          gamma, seed, args) -> dict[str, Any]:
     set_seed(seed)
     start = time.time()
-    pdpa = PDAP(
-        data=train_norm,
-        alpha=args.alpha,
-        gamma=gamma,
-        power=args.power,
-        model="signed",
-        insertion="profile",
-        activation=args.activation_fn,
-        loss_weights="h1",
-        lr=args.pdap_lr,
-        optimizer="SSN",
-        use_sphere=args.use_sphere,
-        verbose=False,
+    cfg = ExperimentConfig(
+        model=ModelConfig(
+            kind="signed", insertion="profile", activation=args.activation_name,
+            power=args.power, loss_weights=(1.0, 1.0), use_sphere=args.use_sphere,
+            alpha=args.alpha, gamma=gamma,
+        ),
+        training=TrainingConfig(lr=args.pdap_lr),
+        env=EnvConfig(verbose=False),
     )
+    pdpa = PDAP(cfg, train_norm)
     result = pdpa.fit(
         num_iterations=args.num_iterations,
         num_insertion=args.num_insertion,
-        threshold=args.threshold,
         max_insert=args.max_insert,
         verbose=False,
     )
@@ -390,7 +380,6 @@ def run_model(model_name, seed, ctx, args) -> dict[str, Any]:
         "hjb_stationary": HJB_IS_STATIONARY[args.dataset_name],
         "num_iterations": args.num_iterations,
         "num_insertion": args.num_insertion,
-        "threshold": args.threshold,
         "max_insert": args.max_insert,
         "elapsed_s": round(time.time() - start, 2),
         "per_gamma": rows,
@@ -483,12 +472,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-iterations", type=int, default=10)
     parser.add_argument("--num-insertion", type=int, default=50)
     parser.add_argument("--max-insert", type=int, default=15)
-    parser.add_argument("--threshold", type=float, default=1e-5)
     parser.add_argument("--alpha", type=float, default=1e-5)
     parser.add_argument("--th", type=float, default=0.5)
     parser.add_argument("--power", type=float, default=1.0)
     parser.add_argument("--pdap-lr", type=float, default=1.0)
     parser.add_argument("--c-init", type=float, default=1.0)
+    parser.add_argument("--use-sphere", action="store_true",
+                        help="sample candidate directions on S^d (only for positively-homogeneous activations)")
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--no-save", action="store_true")
     parser.add_argument("--quiet", action="store_true")
@@ -512,7 +502,7 @@ def main() -> int:
     configure_logging()
     args = parse_args()
     args.activation_name = args.activation
-    args.activation_fn, args.use_sphere = ACTIVATIONS[args.activation]
+    args.activation_fn = ACTIVATIONS[args.activation]
 
     all_runs: list[dict[str, Any]] = []
     total = len(args.datasets) * len(args.models) * len(args.seeds_list)

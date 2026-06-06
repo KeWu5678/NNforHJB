@@ -1,0 +1,6 @@
+- +experiment=activationsearch
+- env.verbose=True
+- env.seed=42
+- model.activation=softplus
+- model.gamma=0
+- model.loss_weights=[1.0,1.0]

@@ -1,0 +1,40 @@
+model:
+  kind: signed
+  insertion: profile
+  activation: matern52
+  power: 1.0
+  loss_weights:
+  - 1.0
+  - 1.0
+  use_sphere: false
+  c_init: 1.0
+  alpha: 1.0e-05
+  gamma: 0.01
+  th: 0.5
+training:
+  num_iterations: 10
+  num_insertion: 50
+  max_insert: 15
+  prune_merge_tol: 0.001
+  lr: 1.0
+  method: levenberg_marquardt
+  max_ls_iter: 500
+  tolerance_ls: 1.00000001
+  tolerance_grad: 0.0
+  sigmamax: 10.0
+  fit_outer_iterations: 20
+  display_every: 2
+  ins_merge_tol: 0.01
+  lbfgs_lr: 0.01
+  lbfgs_steps: 200
+  newton_tol: 1.0e-12
+  newton_max_iter: 50
+data:
+  path: VDP_beta_0.1_grid_30x30.npy
+  normalize: true
+env:
+  seed: 42
+  verbose: true
+  log_level: INFO
+  log_file: null
+name: run

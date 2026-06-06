@@ -21,18 +21,17 @@ trained, not any specific control problem. The only problem-specific input is
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, Tuple
 
 
 @dataclass
 class ModelConfig:
     """A registered model = structure + insertion rule + hyperparameters.
 
-    ``kind`` and ``insertion`` form the model identity (mirroring the
-    ``registry.py`` ``ALIASES``: signed/profile, semiconcave/profile,
-    signed/finite_step). ``activation`` is a registry name (resolved to a
-    callable + its ``use_sphere`` geometry at build time); ``use_sphere=None``
-    derives the geometry from the activation, an explicit bool overrides it.
+    ``kind`` and ``insertion`` form the model identity (the ``conf/model/*.yaml``
+    config group: signed/profile, semiconcave/profile, signed/finite_step).
+    ``activation`` is a registry name resolved to a callable at build time;
+    ``use_sphere`` is set by hand to match the activation's geometry.
     """
 
     # identity
@@ -41,8 +40,11 @@ class ModelConfig:
     # structure
     activation: str = "relu"      # name resolved via src.config.activations
     power: float = 1.0
-    loss_weights: str = "h1"      # "l2" | "h1" | (resolved to a (w1, w2) tuple)
-    use_sphere: Optional[bool] = None
+    # (w1, w2) = (value loss weight, gradient loss weight); l2 = (1, 0), h1 = (1, 1)
+    loss_weights: Tuple[float, float] = (1.0, 1.0)
+    # sample candidate directions on S^d — valid only for positively-homogeneous
+    # activations (relu, abs, ...); set by hand to match the chosen activation.
+    use_sphere: bool = True
     c_init: float = 1.0           # semiconcave only
     # regularization hyperparameters
     alpha: float = 1e-5
@@ -58,9 +60,7 @@ class TrainingConfig:
     num_iterations: int = 10
     num_insertion: int = 50
     max_insert: int = 15
-    prune_merge_tol: float = 1e-3
-    threshold: float = 1e-5       # legacy: recorded by PDAP.fit, not used in the loop
-    decorrelation: bool = False
+    prune_amp_tol: float = 1e-8
     # SSN solver (src/SSN/optimizer.py defaults + the hardcoded iterations=20)
     lr: float = 1.0
     method: str = "levenberg_marquardt"   # "levenberg_marquardt" | "steihaug_cg"
@@ -82,13 +82,17 @@ class TrainingConfig:
 class DataConfig:
     """The data source: a key-based ``.npy`` or ``.npz`` with ``x``, ``v``, ``dv``.
 
-    ``path`` is resolved relative to ``DATA_DIR`` (absolute paths allowed).
+    ``path`` is a bare filename under ``DATA_DIR`` (see ``src.paths``); absolute
+    paths are allowed. Resolution happens in ``src.data.load_value_samples``.
     The default points at the existing legacy VDP ``.npy``; new OpenLoop
     generators save ``.npz`` files with the same keys.
     PDAP splits train/validation internally, so no split knob is needed here.
+    ``normalize`` applies max-abs scaling (with chain-rule gradient transform)
+    at load time; see ``PDAP.from_config``.
     """
 
     path: str = "VDP_beta_0.1_grid_30x30.npy"
+    normalize: bool = True
 
 
 @dataclass
