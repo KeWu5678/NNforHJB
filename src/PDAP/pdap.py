@@ -88,9 +88,9 @@ class PDAP:
             # signed network: convex atoms not required => two-sided dual test.
             self.two_sided = True
             self.model = SignedModel(
-                alpha=m.alpha, gamma=m.gamma, optimizer="SSN", activation=self.activation_fn,
+                alpha=m.alpha, gamma=m.gamma, activation=self.activation_fn,
                 power=m.power, lr=t.lr, loss_weights=loss_weights, th=m.th, verbose=self.verbose,
-                train_outerweights=True, **_solver_kwargs,
+                **_solver_kwargs,
             )
             self.model.input_dim = self.input_dim
         else:

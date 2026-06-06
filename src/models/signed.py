@@ -23,17 +23,15 @@ class SignedModel:
     shallow neural networks
     """
     def __init__(
-        self, 
+        self,
         alpha: float,
-        gamma: float, 
-        optimizer: str = "SGD", 
-        activation: torch.nn.Module = torch.relu, 
-        power: float = 2.1, 
+        gamma: float,
+        activation: torch.nn.Module = torch.relu,
+        power: float = 2.1,
         lr: float = 1.0,
         loss_weights: Tuple[float, float] = (1.0, 1.0),
         th: float = 0.5,
         verbose: bool = True,
-        train_outerweights: bool = False,
         method: Optional[str] = None,
         max_ls_iter: int = 500,
         tolerance_ls: float = 1.0 + 1e-8,
@@ -49,7 +47,6 @@ class SignedModel:
             verbose: Whether to print training progress to terminal (default: True)
         """
         # optimizer parameters
-        self.optimizer_type = optimizer
         self.activation = activation
         self.power = power
         self.q = 2.0 / (self.power + 1.0)
@@ -61,8 +58,6 @@ class SignedModel:
         self.th = th
         # verbose
         self.verbose = verbose
-        # network parameters
-        self.train_outerweights = train_outerweights
         # SSN solver settings (default to today's literals)
         self.method = method
         self.max_ls_iter = max_ls_iter
@@ -79,37 +74,19 @@ class SignedModel:
 
         # High-level setup is logged by PDAP after the data has been prepared.
     
-    def _create_network(self, inner_weights: Optional[torch.Tensor] = None, inner_bias: Optional[torch.Tensor] = None, outer_weights: Optional[torch.Tensor] = None) -> None:
-        """
-        Create the shallow network.
-        
+    def _create_network(self, inner_weights: torch.Tensor, inner_bias: torch.Tensor, outer_weights: torch.Tensor) -> None:
+        """Build the shallow network on a fixed support (frozen inner weights).
+
         Args:
-        For full training:
-            inner_weights: Pre-defined inner weights (optional)
-            inner_bias: Pre-defined inner bias (optional)
-            outer_weights: Pre-defined outer weights (optional)
-        for outer weights training:
-            inner_weights: Pre-defined inner weights (frozen)
-            inner_bias: Pre-defined inner bias (frozen)
-            outer_weights: Pre-defined outer weights (trainable)
+            inner_weights: hidden weights (frozen — the support is fixed by PDAP)
+            inner_bias: hidden bias (frozen)
+            outer_weights: output weights (the only trainable parameters)
         """
-        if inner_weights is not None:
-            input_dim = int(inner_weights.shape[1])
-        else:
-            if self.input_dim is None:
-                raise ValueError("input_dim is not set. Call _prepare_data() before training or pass inner_weights.")
-            input_dim = int(self.input_dim)
+        input_dim = int(inner_weights.shape[1])
+        n = inner_weights.shape[0]
+        if self.verbose:
+            logger.debug("Network support  atoms=%d", n)
 
-        if inner_weights is None:
-            # Default case - no atoms provided, create a network with 30 neurons
-            n = 30
-        else:
-            # Number of neurons is the first dimension for PyTorch
-            n = inner_weights.shape[0]
-            if self.verbose:
-                logger.debug("Network support  atoms=%d", n)
-
-        # Create the shallow network
         self.net = ShallowNetwork(
             [input_dim, n, 1],
             self.activation,
@@ -117,45 +94,24 @@ class SignedModel:
             inner_weights=inner_weights, inner_bias=inner_bias, outer_weights=outer_weights
         )
 
-        if self.train_outerweights:
-            # Freeze hidden layer so only output weights are trainable
-            self.net.hidden.weight.requires_grad = False
-            self.net.hidden.bias.requires_grad = False
+        # Freeze hidden layer so only the output weights are trainable.
+        self.net.hidden.weight.requires_grad = False
+        self.net.hidden.bias.requires_grad = False
 
-    
     def _setup_optimizer(self) -> None:
-        """Setup the optimizer based on optimizer type."""
-        if self.optimizer_type in ["SSN", "SSN_TR"]:
-            if self.train_outerweights:
-                output_params = [self.net.output.weight]
-                # SSN_TR folded into SSN as the trust-region (Steihaug-CG) method;
-                # an explicit configured method overrides the optimizer_type shorthand.
-                method = self.method or (
-                    "steihaug_cg" if self.optimizer_type == "SSN_TR" else "levenberg_marquardt"
-                )
-                self.optimizer = SSN(
-                    output_params, alpha=self.alpha, gamma=self.gamma, th=self.th,
-                    lr=self.lr, power=self.power, method=method,
-                    max_ls_iter=self.max_ls_iter, tolerance_ls=self.tolerance_ls,
-                    tolerance_grad=self.tolerance_grad, sigmamax=self.sigmamax,
-                )
-                if self.verbose:
-                    logger.debug(
-                        "Output-weight solver  method=%s  alpha=%.2e  gamma=%.2e  penalty_mix=%.2f  lr=%.2g",
-                        method, self.alpha, self.gamma, self.th, self.lr,
-                    )
-            else:
-                # SSN optimizer is for outerweights only
-                logger.debug("SSN optimizer is for outerweights only")
-        else:
-            output_params = [self.net.output.weight] if self.train_outerweights else self.net.parameters()
-            optimizer_class = getattr(torch.optim, self.optimizer_type, None)
-
-            if optimizer_class is None:
-                logger.warning("Optimizer %r is not available; using SGD instead", self.optimizer_type)
-                optimizer_class = torch.optim.SGD
-            # Always instantiate the optimizer (including fallback SGD)
-            self.optimizer = optimizer_class(output_params, lr=self.lr)
+        """Build the SSN solver over the output weights (the only free params)."""
+        method = self.method or "levenberg_marquardt"
+        self.optimizer = SSN(
+            [self.net.output.weight], alpha=self.alpha, gamma=self.gamma, th=self.th,
+            lr=self.lr, power=self.power, method=method,
+            max_ls_iter=self.max_ls_iter, tolerance_ls=self.tolerance_ls,
+            tolerance_grad=self.tolerance_grad, sigmamax=self.sigmamax,
+        )
+        if self.verbose:
+            logger.debug(
+                "Output-weight solver  method=%s  alpha=%.2e  gamma=%.2e  penalty_mix=%.2f  lr=%.2g",
+                method, self.alpha, self.gamma, self.th, self.lr,
+            )
     
     def _compute_loss(self, x_input: torch.Tensor, target_v: torch.Tensor, target_dv: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
@@ -316,37 +272,7 @@ class SignedModel:
         iterations: int = 20,
         display_every: int = 2,
     ) -> bool:
-        """Run the SSN outer-weight solve on the already-set atoms (see train())."""
-        return self._fit_loop(data_train, data_valid, iterations, display_every)
-
-    def train(
-        self,
-        data_train: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
-        data_valid: Tuple[torch.Tensor, torch.Tensor, torch.Tensor], 
-        inner_weights: Optional[torch.Tensor] = None, 
-        inner_bias: Optional[torch.Tensor] = None, 
-        outer_weights: Optional[torch.Tensor] = None,
-        iterations: int = 5000, 
-        display_every: int = 1000
-    ) -> bool:
-        """
-        Train the model on the provided data.
-
-        Args:
-            data_train: Training tensors (x, v, dv)
-            data_valid: Validation tensors (x, v, dv)
-            inner_weights: Pre-defined inner weights (optional)
-            inner_bias: Pre-defined inner bias (optional)
-            outer_weights: Pre-defined outer weights (optional)
-            iterations: Number of training iterations (default: 5000)
-            display_every: Display frequency (default: 1000)
-
-        Returns:
-            True if training made progress (at least one successful SSN step),
-            False if SSN line search failed on every step.
-        """
-
-        self._create_network(inner_weights, inner_bias, outer_weights)
+        """Run the SSN outer-weight solve on the already-set atoms."""
         return self._fit_loop(data_train, data_valid, iterations, display_every)
 
     def _fit_loop(
@@ -409,7 +335,7 @@ class SignedModel:
 
             # Save running best model
             # self.net.eval() # set to evaluation mode (not be needed since always full patch)
-            train_loss, train_value_loss, train_grad_loss = self._compute_loss(train_x_tensor, train_v_tensor, train_dv_tensor)
+            train_loss, _, _ = self._compute_loss(train_x_tensor, train_v_tensor, train_dv_tensor)
             if train_loss.item() < best_train_loss:
                 best_train_loss = train_loss.item()
                 best_epoch = epoch
