@@ -15,17 +15,20 @@ tolerances) are read from the model, where the config places them.
 from __future__ import annotations
 
 import logging
-from typing import Dict
+from typing import TYPE_CHECKING, Dict
 
 import torch
 
 from ..SSN import SSN
 from ..SSN.penalty import _phi
 
+if TYPE_CHECKING:
+    from ..models.base import PDAPModel
+
 logger = logging.getLogger(__name__)
 
 
-def ssn_solve(model, data_train, *, iterations: int, verbose: bool = False) -> Dict:
+def ssn_solve(model: "PDAPModel", data_train, *, iterations: int, verbose: bool = False) -> Dict:
     """Solve for the model's outer weights in place; return a fit summary."""
     X, V, dV = data_train
     Phi_v, Phi_g = model.jacobians(X)

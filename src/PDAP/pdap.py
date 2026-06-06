@@ -293,8 +293,8 @@ class PDAP:
             self.model.set_atoms(W, b, c)
 
             # 3. record losses / errors / weights
-            tl = float(self.model._compute_loss(*self.data_train)[0].detach())
-            vl = float(self.model._compute_loss(*self.data_valid)[0].detach())
+            tl = float(self.model.compute_loss(*self.data_train)[0].detach())
+            vl = float(self.model.compute_loss(*self.data_valid)[0].detach())
             self.train_loss.append(tl)
             self.val_loss.append(vl)
             l2t, gt, h1t = relative_errors(*self.model.predict_tensors(self.data_train[0]), *self.data_train[1:])

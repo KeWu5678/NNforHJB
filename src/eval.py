@@ -4,7 +4,7 @@ Pure functions of (prediction, target) tensors with no model state: a model
 produces ``(V, dV)`` via ``predict_tensors`` and the trainer scores them here.
 This is the single home for the data-fidelity numbers (relative errors and the
 value/gradient loss split) that were previously duplicated verbatim inside each
-model's ``_compute_relative_errors`` / ``_compute_loss``.
+model's ``_compute_relative_errors`` / ``compute_loss``.
 
 The regularizer is *not* here: the nonconvex penalty depends on which parameters
 a given model penalizes, so it stays the model's responsibility and is added to

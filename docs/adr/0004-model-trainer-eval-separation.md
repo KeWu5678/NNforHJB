@@ -72,10 +72,13 @@ changes numerics:
 3. Move warm-start into `src/PDAP/` as one generic function.
 4. Move the SSN outer solve into `src/PDAP/`, driven by model Jacobians.
 5. Rewrite the semiconcave model as a composed network with autodiff Jacobians.
-6. Define the thin model contract; `SignedModel` becomes an adapter over
-   `ShallowNetwork`.
+6. Define the thin model contract (`src/models/base.py:PDAPModel`); `SignedModel`
+   becomes an adapter over `ShallowNetwork`.
 
-Step 1 is implemented. The trade-off is a multi-step migration with several
-golden regenerations, against the benefit of removing the duplication, fixing the
-layering inversion (networks no longer depend on their optimizer), and giving
-evaluation a single home.
+All six steps are implemented. In the event, only step 1's split changed
+numerics (a real train/validation split, golden regenerated once); steps 2-6 all
+landed bit-exact, including the semiconcave autodiff Jacobians (autograd runs the
+same operations the analytic feature maps did). The result: the duplication is
+gone, the layering inversion is fixed (neither model imports the SSN optimizer),
+evaluation has a single home, and the trainer depends on one explicit model
+contract.

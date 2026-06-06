@@ -148,7 +148,7 @@ class SemiconcaveModel:
         arg = c if self.q == 1.0 else c.clamp_min(1e-30) ** self.q
         return self.alpha * torch.sum(_phi(arg, self.th, self.gamma))
 
-    def _compute_loss(self, x, V, dV):
+    def compute_loss(self, x, V, dV):
         Vp, dVp = self.predict_tensors(x)
         data, value_loss, grad_loss = data_loss_terms(Vp, dVp, V, dV, self.loss_weights)
         return data + self._penalty(), value_loss, grad_loss

@@ -94,7 +94,7 @@ class SignedModel:
         self.net.hidden.weight.requires_grad = False
         self.net.hidden.bias.requires_grad = False
 
-    def _compute_loss(self, x_input: torch.Tensor, target_v: torch.Tensor, target_dv: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def compute_loss(self, x_input: torch.Tensor, target_v: torch.Tensor, target_dv: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Compute the combined MSE loss for value and gradient matching. The loss always use
         the full batch
@@ -143,6 +143,12 @@ class SignedModel:
             V = self.net(x_req)
             dV = torch.autograd.grad(V.sum(), x_req, create_graph=False)[0]
         return V.detach(), dV.detach()
+
+    def predict(self, x):
+        """Value/gradient as numpy arrays (uniform with SemiconcaveModel.predict)."""
+        xt = torch.as_tensor(x, dtype=torch.float64)
+        V, dV = self.predict_tensors(xt)
+        return V.cpu().numpy(), dV.cpu().numpy()
 
     # ------------------------------------------------------------------ #
     # Uniform atom interface (matches SemiconcaveModel) for the PDAP loop.
