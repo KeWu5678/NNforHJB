@@ -1,17 +1,18 @@
-"""Semiconcave parametric model driven by the SSN pipeline.
+"""Semiconcave parametric model: a composed value network.
 
 Model:  V(x) = 0.5 * C * ||x||^2 - g(x),
         g(x) = sum_i c_i * sigma(w_i . x + b_i)^p + a . x + b0,
-with c_i >= 0 (convex g => semiconcave V), C >= 0, and a, b0 free.
+with c_i >= 0 (convex g => semiconcave V), C >= 0, and a, b0 free.  V is the sum
+of three submaps (quadratic head, shallow network, affine), each linear in its
+own parameters, so V is linear in theta = [c (n) | C (1) | a (d) | b0 (1)] with
+the inner weights (w_i, b_i) frozen.
 
-The outer solve optimises theta = [c (n) | C (1) | a (d) | b0 (1)] with the inner
-weights (w_i, b_i) frozen, using :class:`src.SSN.SSN` with masks: only ``c`` is
-penalised; ``c`` and ``C`` are nonnegative; ``a, b0`` are free.
-
-Both the value and the gradient predictions are *linear* in theta, so the data
-loss is a quadratic whose Hessian is assembled in closed form
-(``_build_data_hessian``) and handed to SSN -- matching the contract of the
-pure-network ``src.model.model`` (which sets ``optimizer.data_hessian``).
+This class is a parametrization only: the composed forward (``_value``), the
+prediction, and the feature maps (``jacobians``, the Jacobians of V and dV w.r.t.
+theta, obtained by autodiff).  The SSN outer solve lives in the trainer
+(:mod:`src.PDAP.ssn_solve`); it reads ``jacobians`` / ``get_theta`` /
+``set_theta`` / ``penalty_masks`` -- only ``c`` is penalised, ``c`` and ``C`` are
+nonnegative, ``a, b0`` are free.
 """
 
 from __future__ import annotations
@@ -109,88 +110,29 @@ class SemiconcaveModel:
         return 0 if self.W is None else int(self.W.shape[0])
 
     # ------------------------------------------------------------------ #
-    # Feature maps (linear in theta = [c | C | a | b0])
+    # Composed value network and prediction.
+    # V(x) = 0.5 C||x||^2 - (sum_i c_i sigma(w_i·x+b_i)^p + a·x + b0),
+    # the sum of three submaps (quadratic head, shallow network, affine), linear
+    # in theta = [c | C | a | b0].  This is the single forward used by both
+    # prediction and the SSN feature maps (jacobians).
     # ------------------------------------------------------------------ #
-    def _atom_value(self, x: torch.Tensor) -> torch.Tensor:
-        """sigma(x w + b)^p, shape (N, n)."""
-        pre = x @ self.W.T + self.b
-        return self.activation(pre) ** self.power
-
-    def _atom_grad_kernel(self, x: torch.Tensor) -> torch.Tensor:
-        """d/dx [sigma^p], stacked to (N*d, n) with row index k*d + l."""
-        z = (x @ self.W.T + self.b).detach().requires_grad_(True)
-        with torch.enable_grad():
-            S = self.activation(z) ** self.power
-            dS_dz = torch.autograd.grad(S, z, grad_outputs=torch.ones_like(S))[0]
-        dS_dz = dS_dz.detach()                       # (N, n)
-        dS_dx = dS_dz.unsqueeze(2) * self.W.unsqueeze(0)  # (N, n, d)
-        return dS_dx.permute(0, 2, 1).reshape(-1, self.W.shape[0])  # (N*d, n)
-
-    def _build_features(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, int]:
-        """Return (Phi_v (N,P), Phi_g (N*d,P), n) for theta=[c|C|a|b0]."""
-        N, d = x.shape
-        n = self.n_neurons
-        # value features
-        cols_v = []
+    def _value(self, theta: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+        """Value V(x) (N, 1) for a parameter vector theta = [c | C | a | b0]."""
+        n, d = self.n_neurons, int(self.input_dim)
+        C = theta[n]
+        a = theta[n + 1:n + 1 + d]
+        b0 = theta[n + 1 + d]
+        quad = 0.5 * C * (x * x).sum(dim=1, keepdim=True)
+        g = (x @ a + b0).reshape(-1, 1)
         if n > 0:
-            cols_v.append(-self._atom_value(x))                       # c: (N,n)
-        cols_v.append(0.5 * (x * x).sum(dim=1, keepdim=True))         # C: (N,1)
-        cols_v.append(-x)                                             # a: (N,d)
-        cols_v.append(-torch.ones(N, 1, dtype=self.dtype))           # b0:(N,1)
-        Phi_v = torch.cat(cols_v, dim=1)
-        # gradient features (rows: k*d + l)
-        cols_g = []
-        if n > 0:
-            cols_g.append(-self._atom_grad_kernel(x))                 # c: (N*d,n)
-        cols_g.append(x.reshape(-1, 1))                               # C: (N*d,1)
-        # a block: -I_d stacked N times  => (N*d, d)
-        neg_I = -torch.eye(d, dtype=self.dtype).repeat(N, 1)          # (N*d, d)
-        cols_g.append(neg_I)
-        cols_g.append(torch.zeros(N * d, 1, dtype=self.dtype))        # b0:(N*d,1)
-        Phi_g = torch.cat(cols_g, dim=1)
-        return Phi_v, Phi_g, n
+            S = self.activation(x @ self.W.T + self.b) ** self.power   # (N, n)
+            g = g + (S @ theta[:n]).reshape(-1, 1)
+        return quad - g
 
-    def _theta_vector(self, n: int) -> torch.Tensor:
-        parts = []
-        if n > 0:
-            parts.append(self.c.reshape(-1))
-        parts.append(torch.tensor([self.C], dtype=self.dtype))
-        parts.append(self.affine_w.reshape(-1))
-        parts.append(torch.tensor([self.affine_b], dtype=self.dtype))
-        return torch.cat(parts)
-
-    def _unpack_theta(self, theta: torch.Tensor, n: int, d: int) -> None:
-        idx = 0
-        if n > 0:
-            self.c = theta[:n].detach().clone()
-            idx = n
-        self.C = float(theta[idx].item()); idx += 1
-        self.affine_w = theta[idx:idx + d].detach().clone(); idx += d
-        self.affine_b = float(theta[idx].item())
-
-    def _masks(self, n: int, d: int) -> Tuple[torch.Tensor, torch.Tensor]:
-        P = n + d + 2
-        penalized = torch.zeros(P, dtype=torch.bool)
-        nonneg = torch.zeros(P, dtype=torch.bool)
-        if n > 0:
-            penalized[:n] = True
-            nonneg[:n] = True
-        nonneg[n] = True  # C >= 0, unpenalised
-        return penalized, nonneg
-
-    # ------------------------------------------------------------------ #
-    # Prediction / losses (analytic, for eval & logging)
-    # ------------------------------------------------------------------ #
     def predict_tensors(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        x_req = x.detach().clone().requires_grad_(True)
         with torch.enable_grad():
-            x_req = x.detach().clone().requires_grad_(True)
-            quad = 0.5 * self.C * (x_req * x_req).sum(dim=1, keepdim=True)
-            g = x_req @ self.affine_w + self.affine_b
-            if self.n_neurons > 0:
-                g = g.reshape(-1, 1) + (self._atom_value(x_req) @ self.c).reshape(-1, 1)
-            else:
-                g = g.reshape(-1, 1)
-            V = quad - g
+            V = self._value(self.get_theta(), x_req)
             dV = torch.autograd.grad(V.sum(), x_req, create_graph=False)[0]
         return V.detach(), dV.detach()
 
@@ -214,23 +156,58 @@ class SemiconcaveModel:
     # ------------------------------------------------------------------ #
     # Linear-in-theta interface for the trainer SSN solve (src.PDAP.ssn_solve).
     # theta = [c (n) | C (1) | a (d) | b0 (1)]; the c block is penalized and
-    # nonnegative, C is nonnegative (unpenalized), a and b0 are free.
+    # nonnegative, C is nonnegative (unpenalized), a and b0 are free.  The
+    # feature maps are the Jacobians of (V, dV) w.r.t. theta, obtained by
+    # autodiffing the composed forward (constant in theta, so built once).
     # ------------------------------------------------------------------ #
     def jacobians(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """Feature maps (Phi_v (N,P), Phi_g (N*d,P)) of V, dV w.r.t. theta."""
         self._ensure_affine(x.shape[1])
-        Phi_v, Phi_g, _ = self._build_features(x)
+        theta = self.get_theta().detach()
+        x_det = x.detach()
+
+        Phi_v = torch.autograd.functional.jacobian(
+            lambda th: self._value(th, x_det).reshape(-1), theta, vectorize=True,
+        )
+
+        def grad_value(th: torch.Tensor) -> torch.Tensor:
+            xr = x_det.requires_grad_(True)
+            V = self._value(th, xr)
+            return torch.autograd.grad(V.sum(), xr, create_graph=True)[0].reshape(-1)
+
+        Phi_g = torch.autograd.functional.jacobian(grad_value, theta, vectorize=True)
         return Phi_v, Phi_g
 
     def get_theta(self) -> torch.Tensor:
-        return self._theta_vector(self.n_neurons)
+        """Pack [c | C | a | b0] into one vector (the SSN working variable)."""
+        n = self.n_neurons
+        parts = []
+        if n > 0:
+            parts.append(self.c.reshape(-1))
+        parts.append(torch.tensor([self.C], dtype=self.dtype))
+        parts.append(self.affine_w.reshape(-1))
+        parts.append(torch.tensor([self.affine_b], dtype=self.dtype))
+        return torch.cat(parts)
 
     def set_theta(self, theta: torch.Tensor) -> None:
-        n = self.n_neurons
-        self._unpack_theta(theta, n, int(self.input_dim))
+        """Unpack theta back into (c>=0, C>=0, a, b0)."""
+        n, d = self.n_neurons, int(self.input_dim)
+        idx = 0
         if n > 0:
-            self.c = self.c.clamp_min(0.0)
-        self.C = max(self.C, 0.0)
+            self.c = theta[:n].detach().clone().clamp_min(0.0)
+            idx = n
+        self.C = max(float(theta[idx].item()), 0.0); idx += 1
+        self.affine_w = theta[idx:idx + d].detach().clone(); idx += d
+        self.affine_b = float(theta[idx].item())
 
     def penalty_masks(self) -> Tuple[torch.Tensor, torch.Tensor]:
-        return self._masks(self.n_neurons, int(self.input_dim))
+        """Bool masks over theta: penalized (c block) and nonnegative (c, C)."""
+        n, d = self.n_neurons, int(self.input_dim)
+        P = n + d + 2
+        penalized = torch.zeros(P, dtype=torch.bool)
+        nonneg = torch.zeros(P, dtype=torch.bool)
+        if n > 0:
+            penalized[:n] = True
+            nonneg[:n] = True
+        nonneg[n] = True  # C >= 0, unpenalised
+        return penalized, nonneg

@@ -55,8 +55,8 @@ def test_predict_matches_linear_features():
     m.C = 1.3
     m.affine_w = torch.tensor([0.2, -0.4], dtype=torch.float64)
     m.affine_b = 0.7
-    Phi_v, Phi_g, _ = m._build_features(x)
-    theta = m._theta_vector(n)
+    Phi_v, Phi_g = m.jacobians(x)
+    theta = m.get_theta()
     Vp, dVp = m.predict_tensors(x)
     assert torch.allclose(Phi_v @ theta, Vp.reshape(-1), atol=1e-10)
     assert torch.allclose(Phi_g @ theta, dVp.reshape(-1), atol=1e-10)
@@ -68,7 +68,7 @@ def test_augmented_hessian_matches_autograd():
     W, b = _atoms(n, d, seed=3)
     m = SemiconcaveModel(alpha=1e-3, gamma=1.0, power=1.0, verbose=False)
     m.set_atoms(W, b, torch.zeros(n))
-    Phi_v, Phi_g, _ = m._build_features(x)
+    Phi_v, Phi_g = m.jacobians(x)
     Vt = torch.randn(N, dtype=torch.float64)
     dVt = torch.randn(N * d, dtype=torch.float64)
     Nx = N * d
@@ -79,7 +79,7 @@ def test_augmented_hessian_matches_autograd():
         rg = Phi_g @ th - dVt
         return (1.0 / (2 * Nx)) * (rv @ rv) + (1.0 / (2 * Nx)) * (rg @ rg)
 
-    Hau = torch.autograd.functional.hessian(dloss, m._theta_vector(n))
+    Hau = torch.autograd.functional.hessian(dloss, m.get_theta())
     assert torch.allclose(H, Hau, atol=1e-10)
 
 
