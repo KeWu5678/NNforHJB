@@ -27,6 +27,7 @@ from ..models.semiconcave import SemiconcaveModel
 from ..eval import relative_errors
 from .insertion import profile_threshold, finite_step
 from .warmstart import warm_start
+from .ssn_solve import ssn_solve
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +55,6 @@ class PDAP:
         self.verbose = bool(cfg.env.verbose)
         # outer-loop + insertion settings (threaded into fit / _insert)
         self.fit_outer_iterations = int(t.fit_outer_iterations)
-        self.display_every = int(t.display_every)
         self.ins_merge_tol = float(t.ins_merge_tol)
         self.lbfgs_lr = float(t.lbfgs_lr)
         self.lbfgs_steps = int(t.lbfgs_steps)
@@ -279,11 +279,10 @@ class PDAP:
             supp_before = self.model.n_neurons
 
             # 1. SSN on outer weights (inner weights frozen)
-            self.model.fit_outer_weights(
-                self.data_train, self.data_valid,
-                iterations=self.fit_outer_iterations, display_every=self.display_every,
+            fit_summary = ssn_solve(
+                self.model, self.data_train,
+                iterations=self.fit_outer_iterations, verbose=verbose,
             )
-            fit_summary = getattr(self.model, "last_fit_summary", {})
 
             # 2. prune: defensive gate — drop negligible atoms
             W, b, c = self.model.get_atoms()

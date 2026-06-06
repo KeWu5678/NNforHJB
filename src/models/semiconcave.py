@@ -22,7 +22,6 @@ from typing import Callable, Tuple
 import numpy as np
 import torch
 
-from ..SSN import SSN
 from ..SSN.penalty import _phi
 from ..eval import data_loss_terms
 
@@ -212,85 +211,26 @@ class SemiconcaveModel:
         data, value_loss, grad_loss = data_loss_terms(Vp, dVp, V, dV, self.loss_weights)
         return data + self._penalty(), value_loss, grad_loss
 
-    def fit_outer_weights(
-        self,
-        data_train: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
-        data_valid: Tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None = None,
-        iterations: int = 20,
-        display_every: int = 2,
-    ) -> bool:
-        """Uniform training entry: SSN on the already-set atoms (ignores valid set)."""
-        x, V, dV = data_train
-        return self.train_ssn(x, V, dV, iterations=iterations)
-
     # ------------------------------------------------------------------ #
-    # SSN outer solve
+    # Linear-in-theta interface for the trainer SSN solve (src.PDAP.ssn_solve).
+    # theta = [c (n) | C (1) | a (d) | b0 (1)]; the c block is penalized and
+    # nonnegative, C is nonnegative (unpenalized), a and b0 are free.
     # ------------------------------------------------------------------ #
-    def train_ssn(self, x: torch.Tensor, V: torch.Tensor, dV: torch.Tensor,
-                  iterations: int = 20) -> bool:
-        N, d = x.shape
-        self._ensure_affine(d)
-        n = self.n_neurons
-
+    def jacobians(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Feature maps (Phi_v (N,P), Phi_g (N*d,P)) of V, dV w.r.t. theta."""
+        self._ensure_affine(x.shape[1])
         Phi_v, Phi_g, _ = self._build_features(x)
-        Phi_v = Phi_v.detach()
-        Phi_g = Phi_g.detach()
-        Vt = V.reshape(-1).detach()
-        dVt = dV.reshape(-1).detach()
-        Nx = N * d
-        w1, w2 = self.loss_weights
+        return Phi_v, Phi_g
 
-        H = (w1 / Nx) * (Phi_v.T @ Phi_v) + (w2 / Nx) * (Phi_g.T @ Phi_g)
+    def get_theta(self) -> torch.Tensor:
+        return self._theta_vector(self.n_neurons)
 
-        theta = torch.nn.Parameter(self._theta_vector(n))
-        penalized, nonneg = self._masks(n, d)
-
-        optimizer = SSN(
-            [theta], alpha=self.alpha, gamma=self.gamma,
-            penalized_mask=penalized, nonneg_mask=nonneg,
-            th=self.th, lr=self.lr, power=self.power,
-            method=self.method, max_ls_iter=self.max_ls_iter,
-            tolerance_ls=self.tolerance_ls, tolerance_grad=self.tolerance_grad,
-            sigmamax=self.sigmamax,
-        )
-        optimizer.data_hessian = H
-
-        def closure():
-            optimizer.zero_grad()
-            rv = Phi_v @ theta - Vt
-            rg = Phi_g @ theta - dVt
-            data = (w1 / (2 * Nx)) * (rv @ rv) + (w2 / (2 * Nx)) * (rg @ rg)
-            # penalty on the c block (theta[:n] >= 0), matching alpha_vec/_penalty_grad
-            if n > 0:
-                cblk = theta[:n].clamp_min(0.0)
-                arg = cblk if self.q == 1.0 else cblk.clamp_min(1e-30) ** self.q
-                penalty = self.alpha * torch.sum(_phi(arg, self.th, self.gamma))
-            else:
-                penalty = torch.zeros((), dtype=self.dtype)
-            return data + penalty
-
-        made_progress = False
-        prev = float(closure().detach())
-        for _ in range(iterations):
-            loss = float(optimizer.step(closure).detach())
-            if loss < prev - 1e-15:
-                made_progress = True
-            prev = loss
-
-        self._unpack_theta(theta.detach(), n, d)
+    def set_theta(self, theta: torch.Tensor) -> None:
+        n = self.n_neurons
+        self._unpack_theta(theta, n, int(self.input_dim))
         if n > 0:
             self.c = self.c.clamp_min(0.0)
         self.C = max(self.C, 0.0)
-        self.last_fit_summary = {
-            "best_step": iterations - 1,
-            "best_train_loss": prev,
-            "successful_steps": iterations if made_progress else 0,
-            "curvature": self.C,
-            "total_atom_weight": float(self.c.abs().sum()) if n > 0 else 0.0,
-        }
-        if self.verbose:
-            logger.debug(
-                "Semiconcave fit   curvature=%.4e  total atom weight=%.4e",
-                self.C, float(self.c.abs().sum()) if n > 0 else 0.0,
-            )
-        return made_progress
+
+    def penalty_masks(self) -> Tuple[torch.Tensor, torch.Tensor]:
+        return self._masks(self.n_neurons, int(self.input_dim))

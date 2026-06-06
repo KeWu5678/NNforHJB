@@ -4,6 +4,7 @@ import numpy as np
 import torch
 
 from src.SSN import SSN
+from src.PDAP.ssn_solve import ssn_solve
 from src.eval import relative_errors
 from src.models.semiconcave import SemiconcaveModel
 
@@ -98,7 +99,7 @@ def test_train_ssn_recovers_synthetic_semiconcave_target():
     fit.C = 0.5
     fit.affine_w = torch.zeros(d, dtype=torch.float64)
     fit.affine_b = 0.0
-    fit.train_ssn(x, V, dV, iterations=25)
+    ssn_solve(fit, (x, V, dV), iterations=25)
 
     _, _, h1 = relative_errors(*fit.predict_tensors(x), V, dV)
     assert h1 < 1e-2

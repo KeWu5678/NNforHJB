@@ -9,7 +9,6 @@ Created on Tue Dec  3 18:30:52 2024
 from typing import Optional, Tuple
 import logging
 import torch
-from ..SSN import SSN
 from ..SSN.penalty import _phi
 from ..eval import data_loss_terms
 from .net import ShallowNetwork
@@ -65,10 +64,8 @@ class SignedModel:
         self.sigmamax = sigmamax
         self.input_dim: Optional[int] = None
         
-        # Initialize training components
+        # Network is (re)built by set_atoms; the SSN solve lives in the trainer.
         self.net = None
-        self.optimizer = None  # Will store the actual optimizer instance (standard PyTorch convention)
-        self.loss_history = {'train_loss': [], 'val_loss': [], 'value_loss': [], 'grad_loss': []}
         self.last_fit_summary = {}
 
         # High-level setup is logged by PDAP after the data has been prepared.
@@ -97,21 +94,6 @@ class SignedModel:
         self.net.hidden.weight.requires_grad = False
         self.net.hidden.bias.requires_grad = False
 
-    def _setup_optimizer(self) -> None:
-        """Build the SSN solver over the output weights (the only free params)."""
-        method = self.method or "levenberg_marquardt"
-        self.optimizer = SSN(
-            [self.net.output.weight], alpha=self.alpha, gamma=self.gamma, th=self.th,
-            lr=self.lr, power=self.power, method=method,
-            max_ls_iter=self.max_ls_iter, tolerance_ls=self.tolerance_ls,
-            tolerance_grad=self.tolerance_grad, sigmamax=self.sigmamax,
-        )
-        if self.verbose:
-            logger.debug(
-                "Output-weight solver  method=%s  alpha=%.2e  gamma=%.2e  penalty_mix=%.2f  lr=%.2g",
-                method, self.alpha, self.gamma, self.th, self.lr,
-            )
-    
     def _compute_loss(self, x_input: torch.Tensor, target_v: torch.Tensor, target_dv: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Compute the combined MSE loss for value and gradient matching. The loss always use
@@ -187,129 +169,25 @@ class SignedModel:
     def n_neurons(self) -> int:
         return 0 if self.net is None else int(self.net.hidden.weight.shape[0])
 
-    def fit_outer_weights(
-        self,
-        data_train: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
-        data_valid: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
-        iterations: int = 20,
-        display_every: int = 2,
-    ) -> bool:
-        """Run the SSN outer-weight solve on the already-set atoms."""
-        return self._fit_loop(data_train, data_valid, iterations, display_every)
+    # ------------------------------------------------------------------ #
+    # Linear-in-theta interface for the trainer SSN solve (src.PDAP.ssn_solve).
+    # theta is the output weight; the frozen network's value matrix and gradient
+    # kernel are the feature maps. All coords are penalized, none nonnegative.
+    # ------------------------------------------------------------------ #
+    def jacobians(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Feature maps (Phi_v (N,n), Phi_g (N*d,n)) of V, dV w.r.t. theta."""
+        if self.net is None:
+            raise RuntimeError("network not created yet; call set_atoms() first")
+        x_det = x.detach()
+        return self.net.forward_network_matrix(x_det), self.net.forward_gradient_kernel(x_det)
 
-    def _fit_loop(
-        self,
-        data_train: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
-        data_valid: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
-        iterations: int,
-        display_every: int,
-    ) -> bool:
-        """SSN outer-weight solve on the already-built network (the body of train)."""
-        # Initialize
-        train_x_tensor, train_v_tensor, train_dv_tensor = data_train
-        valid_x_tensor, valid_v_tensor, valid_dv_tensor = data_valid
-        self._setup_optimizer()
-        if self.verbose:
-            logger.debug("Output-weight training")
-            logger.debug("  %-6s %-14s %-14s", "step", "train loss", "val loss")
-        
-        # Reset loss history
-        self.loss_history = {'train_loss': [], 'val_loss': [], 'value_loss': [], 'grad_loss': []}
-        # Track and save the running best model by training loss.
-        best_train_loss = float('inf')
-        best_epoch = -1
-        # Ensure best_state is always defined (e.g. iterations == 0)
-        best_state = {k: v.detach().clone() for k, v in self.net.state_dict().items()}
+    def get_theta(self) -> torch.Tensor:
+        return self.net.output.weight.detach().reshape(-1).clone()
 
-        # Define closure() for SSN
-        def closure():
-            total_loss, _, _ = self._compute_loss(
-                train_x_tensor, train_v_tensor, train_dv_tensor
-            )
-            return total_loss
+    def set_theta(self, theta: torch.Tensor) -> None:
+        with torch.no_grad():
+            self.net.output.weight.copy_(theta.reshape(1, -1))
 
-        # Training loop
-        consecutive_failed_ssn_steps = 0
-        max_consecutive_failed_ssn_steps = 3
-        successful_steps = 0
-        for epoch in range(iterations):
-            self.optimizer.zero_grad()
-            if isinstance(self.optimizer, SSN):
-                x_detach = train_x_tensor.detach()
-                S = self.net.forward_network_matrix(x_detach).detach()       # (N, n)
-                S_grad = self.net.forward_gradient_kernel(x_detach).detach() # (N*d, n)
-                N = S.shape[0]
-                d = train_x_tensor.shape[1]
-                Nx = N * d
-                # Data-loss Hessian: d²l/du² = (1/Nx)*(w1*S'S + w2*S_grad'S_grad)
-                # Matches MATLAB: ddF = 1/Nx where Nx = numel(xhat) = d*N
-                self.optimizer.data_hessian = (1.0 / Nx) * (
-                    self.loss_weights[0] * (S.T @ S)
-                    + self.loss_weights[1] * (S_grad.T @ S_grad)
-                )
-                loss = self.optimizer.step(closure)
-            else:
-                total_loss, _, _ = self._compute_loss(train_x_tensor, train_v_tensor, train_dv_tensor)
-                total_loss.backward()
-                self.optimizer.step()
-                loss = total_loss
-                successful_steps += 1
-
-            # Save running best model
-            # self.net.eval() # set to evaluation mode (not be needed since always full patch)
-            train_loss, _, _ = self._compute_loss(train_x_tensor, train_v_tensor, train_dv_tensor)
-            if train_loss.item() < best_train_loss:
-                best_train_loss = train_loss.item()
-                best_epoch = epoch
-                # Snapshot a real checkpoint (not just a view into current params)
-                best_state = {k: v.detach().clone() for k, v in self.net.state_dict().items()}
-
-            # Early-stop SSN training if line search fails repeatedly
-            if isinstance(self.optimizer, SSN):
-                step_success = bool(getattr(self.optimizer, "last_step_success", True))
-                if not step_success:
-                    consecutive_failed_ssn_steps += 1
-                    if self.verbose:
-                        max_ls_iter = self.optimizer.param_groups[0]['max_ls_iter']
-                        logger.debug(
-                            f"SSN step rejected (consecutive={consecutive_failed_ssn_steps}/{max_consecutive_failed_ssn_steps}, max_ls_iter={max_ls_iter})"
-                        )
-                else:
-                    consecutive_failed_ssn_steps = 0
-                    successful_steps += 1
-
-                if consecutive_failed_ssn_steps >= max_consecutive_failed_ssn_steps:
-                    if self.verbose:
-                        logger.info(
-                            f"SSN early stop: line search stalled {max_consecutive_failed_ssn_steps} epochs; "
-                            f"restored best epoch {best_epoch} (train={best_train_loss:.3e})."
-                        )
-                    break
-            
-            # log the loss
-            if epoch % display_every == 0:
-                val_loss, val_value_loss, val_grad_loss = self._compute_loss(
-                    valid_x_tensor, valid_v_tensor, valid_dv_tensor
-                )
-                if self.verbose:
-                    logger.debug("  %6d %-14.6e %-14.6e", epoch, loss.item(), val_loss.item())
-                self.loss_history['train_loss'].append(loss.item())
-                self.loss_history['val_loss'].append(val_loss.item())
-                self.loss_history['value_loss'].append(val_value_loss.item())
-                self.loss_history['grad_loss'].append(val_grad_loss.item())
-
-        
-        # Restore the best model before returning and report best loss
-        self.net.load_state_dict(best_state)
-        self.last_fit_summary = {
-            "best_step": best_epoch,
-            "best_train_loss": best_train_loss,
-            "successful_steps": successful_steps,
-        }
-        if self.verbose:
-            logger.debug(
-                "Output-weight solve complete  best_inner_step=%d  best_train_loss=%.6e",
-                best_epoch, best_train_loss,
-            )
-
-        return successful_steps > 0
+    def penalty_masks(self) -> Tuple[torch.Tensor, torch.Tensor]:
+        n = self.n_neurons
+        return torch.ones(n, dtype=torch.bool), torch.zeros(n, dtype=torch.bool)
