@@ -12,6 +12,7 @@ import torch
 from ..SSN import SSN
 from ..SSN.penalty import _phi
 from ..SSN.prox import _phi_prox
+from ..eval import data_loss_terms
 from .net import ShallowNetwork
 
 logger = logging.getLogger(__name__)
@@ -29,9 +30,8 @@ class SignedModel:
         activation: torch.nn.Module = torch.relu, 
         power: float = 2.1, 
         lr: float = 1.0,
-        loss_weights: Tuple[float, float] = (1.0, 1.0), 
+        loss_weights: Tuple[float, float] = (1.0, 1.0),
         th: float = 0.5,
-        training_percentage: float = 0.9,
         verbose: bool = True,
         train_outerweights: bool = False,
         method: Optional[str] = None,
@@ -45,12 +45,9 @@ class SignedModel:
             activation: Callable[[], Tensor]
             power: Power for activation function (default: 1.0)
             loss_weights: Weights for (value_loss, gradient_loss) (default: (1.0, 1.0))
-            training_percentage: Fraction of data for training (default: 0.9)
             th: Interpolation parameter between L1 (th=0) and non-convex (th=1) (default: 0.5)
             verbose: Whether to print training progress to terminal (default: True)
         """
-        # data processing parameters
-        self.training_percentage = training_percentage
         # optimizer parameters
         self.optimizer_type = optimizer
         self.activation = activation
@@ -81,53 +78,6 @@ class SignedModel:
         self.last_fit_summary = {}
 
         # High-level setup is logged by PDAP after the data has been prepared.
-    
-    def _prepare_data(self, data: dict) -> Tuple[Tuple[torch.Tensor, torch.Tensor, torch.Tensor], Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
-        """
-        Prepare and split data into training and validation sets.
-        
-        Args:
-            data: Dictionary with keys 'x', 'v', 'dv'
-            
-        Returns:
-            Tuple of (train_tensors, valid_tensors) where each is (x, v, dv)
-        """
-        # Handle different data formats
-        if isinstance(data, dict):
-            # Already in dictionary format
-            ob_x, ob_v, ob_dv = data["x"], data["v"], data["dv"]
-        else:   
-            raise ValueError(
-                "Data must be provided as a dictionary with keys 'x', 'v', 'dv'. "
-                "Please convert your structured numpy array to dictionary format:\n"
-                "  data = {'x': x_array, 'v': v_array, 'dv': dv_array}"
-            )
-        
-        # Record input dimension for network creation
-        if hasattr(ob_x, "ndim") and ob_x.ndim < 2:
-            raise ValueError(f"Expected 'x' to be 2D with shape (N, d); got shape {getattr(ob_x, 'shape', None)}")
-        self.input_dim = int(ob_x.shape[1])
-
-        # Split data into training and validation sets
-        split_idx = int(len(ob_x) * self.training_percentage)
-        train_x, valid_x = ob_x[:split_idx], ob_x[split_idx:]
-        train_v, valid_v = ob_v[:split_idx], ob_v[split_idx:]
-        train_dv, valid_dv = ob_dv[:split_idx], ob_dv[split_idx:]
-        
-        # Convert to tensors
-        train_tensors = (
-            torch.tensor(train_x, dtype=torch.float64, requires_grad=True),
-            torch.tensor(train_v.reshape(-1, 1), dtype=torch.float64),
-            torch.tensor(train_dv, dtype=torch.float64)
-        )
-        
-        valid_tensors = (
-            torch.tensor(valid_x, dtype=torch.float64, requires_grad=True),
-            torch.tensor(valid_v.reshape(-1, 1), dtype=torch.float64),
-            torch.tensor(valid_dv, dtype=torch.float64)
-        )
-        
-        return train_tensors, valid_tensors
     
     def _create_network(self, inner_weights: Optional[torch.Tensor] = None, inner_bias: Optional[torch.Tensor] = None, outer_weights: Optional[torch.Tensor] = None) -> None:
         """
@@ -230,14 +180,10 @@ class SignedModel:
             retain_graph=True
         )[0]
         
-        # Match MATLAB: Nx = numel(p.xhat) = d * N_points
-        # (setup_problem_NN_2d_from_xhat.m Tracking function, line ~196)
-        N = x_input.shape[0]
-        d = x_input.shape[1]
-        Nx = N * d
-        value_loss = torch.sum((pred_v - target_v) ** 2) / (2 * Nx)
-        grad_loss = torch.sum((pred_dv - target_dv) ** 2) / (2 * Nx)
-        data_loss = self.loss_weights[0] * value_loss + self.loss_weights[1] * grad_loss
+        # Data-fidelity term (Nx = N*d normalization) lives in src.eval.
+        data_loss, value_loss, grad_loss = data_loss_terms(
+            pred_v, pred_dv, target_v, target_dv, self.loss_weights
+        )
 
         # Full objective: data loss + regularization
         # Matches MATLAB SSN.m line 34: obj = @(u) F.F(Sred*u - ref) + alpha*sum(phi.phi(computeNorm(u, NQ)))
@@ -246,34 +192,6 @@ class SignedModel:
         total_loss = data_loss + self.alpha * torch.sum(_phi(reg_arg, self.th, self.gamma))
  
         return total_loss, value_loss, grad_loss
-
-    @torch.no_grad()
-    def _compute_relative_errors(
-        self, x_input: torch.Tensor, target_v: torch.Tensor, target_dv: torch.Tensor
-    ) -> Tuple[float, float, float]:
-        """Compute relative L2, gradient, and H1 errors.
-
-        Returns:
-            (err_l2, err_grad, err_h1) as plain floats.
-        """
-        x = x_input.clone().detach().requires_grad_(True)
-        with torch.enable_grad():
-            pred_v = self.net(x)
-            pred_dv = torch.autograd.grad(
-                outputs=pred_v, inputs=x,
-                grad_outputs=torch.ones_like(pred_v),
-                create_graph=False, retain_graph=False,
-            )[0]
-
-        v_diff_sq = torch.sum((pred_v - target_v) ** 2)
-        v_true_sq = torch.sum(target_v ** 2)
-        dv_diff_sq = torch.sum((pred_dv - target_dv) ** 2)
-        dv_true_sq = torch.sum(target_dv ** 2)
-
-        err_l2 = torch.sqrt(v_diff_sq / v_true_sq.clamp_min(1e-30))
-        err_grad = torch.sqrt(dv_diff_sq / dv_true_sq.clamp_min(1e-30))
-        err_h1 = torch.sqrt((v_diff_sq + dv_diff_sq) / (v_true_sq + dv_true_sq).clamp_min(1e-30))
-        return float(err_l2.item()), float(err_grad.item()), float(err_h1.item())
 
     def predict_tensors(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """Return (V, dV) at x as detached tensors, V:(N,1), dV:(N,d).

@@ -86,12 +86,14 @@ class DataConfig:
     paths are allowed. Resolution happens in ``src.data.load_value_samples``.
     The default points at the existing legacy VDP ``.npy``; new OpenLoop
     generators save ``.npz`` files with the same keys.
-    PDAP splits train/validation internally, so no split knob is needed here.
+    ``train_fraction`` is the train/validation split applied in
+    ``src.data.split_value_samples`` (first fraction trains, rest validates).
     ``normalize`` applies max-abs scaling (with chain-rule gradient transform)
     at load time; see ``PDAP.from_config``.
     """
 
     path: str = "VDP_beta_0.1_grid_30x30.npy"
+    train_fraction: float = 0.9
     normalize: bool = True
 
 

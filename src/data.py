@@ -19,11 +19,13 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import torch
 
 from .paths import DATA_DIR
 
 
 ValueSamples = dict[str, np.ndarray]
+TensorSamples = tuple[torch.Tensor, torch.Tensor, torch.Tensor]
 
 
 def _as_value_samples(raw: Any) -> ValueSamples:
@@ -98,3 +100,23 @@ def normalize_value_samples(samples: ValueSamples) -> tuple[ValueSamples, ValueS
     """Fit a normalizer and return normalized value samples plus the transform."""
     normalizer = ValueSampleNormalizer.fit(samples)
     return normalizer.normalize(samples), normalizer
+
+
+def split_value_samples(
+    samples: ValueSamples, train_fraction: float = 0.9,
+) -> tuple[TensorSamples, TensorSamples]:
+    """Split value samples into (train, valid) float64 tensor tuples (x, v, dv).
+
+    The first floor(N * train_fraction) samples train, the rest validate.
+    ValueSamples are already float64 with v shaped (N, 1) (see _as_value_samples),
+    so the tensors inherit that contract — no per-tensor dtype/reshape needed.
+    """
+    n = samples["x"].shape[0]
+    split = int(n * train_fraction)
+    if not 0 < split < n:
+        raise ValueError(
+            f"train_fraction={train_fraction} gives a {split}/{n - split} split; "
+            "both sides must be non-empty"
+        )
+    take = lambda sl: tuple(torch.tensor(samples[k][sl]) for k in ("x", "v", "dv"))
+    return take(slice(None, split)), take(slice(split, None))

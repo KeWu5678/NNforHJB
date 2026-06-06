@@ -24,6 +24,7 @@ import torch
 
 from ..models.signed import SignedModel
 from ..models.semiconcave import SemiconcaveModel
+from ..eval import relative_errors
 from .insertion import profile_threshold, finite_step
 
 logger = logging.getLogger(__name__)
@@ -75,18 +76,23 @@ class PDAP:
         self.inner_weights: List[Dict[str, torch.Tensor]] = []
         self.outer_weights: List[torch.Tensor] = []
 
+        from ..data import split_value_samples
+
         loss_weights = tuple(m.loss_weights)
+        # Input dimension is a property of the data, not the model: read it here
+        # and inject it, rather than having the model discover it during prep.
+        self.input_dim = int(data["x"].shape[1])
+        self.data_train, self.data_valid = split_value_samples(data, cfg.data.train_fraction)
+
         if m.kind == "signed":
             # signed network: convex atoms not required => two-sided dual test.
             self.two_sided = True
-            N_total = data["x"].shape[0]
             self.model = SignedModel(
                 alpha=m.alpha, gamma=m.gamma, optimizer="SSN", activation=self.activation_fn,
                 power=m.power, lr=t.lr, loss_weights=loss_weights, th=m.th, verbose=self.verbose,
-                train_outerweights=True, training_percentage=(N_total - 1) / N_total,
-                **_solver_kwargs,
+                train_outerweights=True, **_solver_kwargs,
             )
-            self.data_train, self.data_valid = self.model._prepare_data(data)
+            self.model.input_dim = self.input_dim
         else:
             # semiconcave: convex g => one-sided dual test (nonnegative mass).
             self.two_sided = False
@@ -95,12 +101,8 @@ class PDAP:
                 loss_weights=loss_weights, lr=t.lr, c_init=m.c_init, verbose=self.verbose,
                 **_solver_kwargs,
             )
-            self.data_train, self.data_valid = self.model._prepare_data(data)
-            self.model._ensure_affine(int(self.model.input_dim))
-
-        if self.model.input_dim is None:
-            raise ValueError("Could not infer input dimension from data['x'] (N, d).")
-        self.input_dim = int(self.model.input_dim)
+            self.model.input_dim = self.input_dim
+            self.model._ensure_affine(self.input_dim)
         if self.verbose:
             train_count = int(self.data_train[0].shape[0])
             valid_count = int(self.data_valid[0].shape[0])
@@ -280,8 +282,8 @@ class PDAP:
             vl = float(self.model._compute_loss(*self.data_valid)[0].detach())
             self.train_loss.append(tl)
             self.val_loss.append(vl)
-            l2t, gt, h1t = self.model._compute_relative_errors(*self.data_train)
-            l2v, gv, h1v = self.model._compute_relative_errors(*self.data_valid)
+            l2t, gt, h1t = relative_errors(*self.model.predict_tensors(self.data_train[0]), *self.data_train[1:])
+            l2v, gv, h1v = relative_errors(*self.model.predict_tensors(self.data_valid[0]), *self.data_valid[1:])
             self.err_l2_train.append(l2t); self.err_l2_val.append(l2v)
             self.err_grad_train.append(gt); self.err_grad_val.append(gv)
             self.err_h1_train.append(h1t); self.err_h1_val.append(h1v)

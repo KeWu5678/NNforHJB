@@ -25,6 +25,7 @@ import torch
 from ..SSN import SSN
 from ..SSN.penalty import _phi
 from ..SSN.prox import _phi_prox
+from ..eval import data_loss_terms
 
 logger = logging.getLogger(__name__)
 
@@ -81,23 +82,6 @@ class SemiconcaveModel:
         self.affine_b: float = 0.0
         self.input_dim: int | None = None
         self.last_fit_summary = {}
-
-    def _prepare_data(self, data: dict):
-        """Split a data dict into (train, valid) tensor tuples (x, V, dV).
-
-        Mirrors src.model.model._prepare_data: all-but-one point for training,
-        the last for validation (the external eval set is held out separately).
-        """
-        ob_x, ob_v, ob_dv = data["x"], data["v"], data["dv"]
-        x = torch.as_tensor(ob_x, dtype=self.dtype)
-        v = torch.as_tensor(ob_v, dtype=self.dtype).reshape(-1, 1)
-        dv = torch.as_tensor(ob_dv, dtype=self.dtype)
-        self.input_dim = int(x.shape[1])
-        n = x.shape[0]
-        split = max(1, n - 1)
-        train = (x[:split], v[:split], dv[:split])
-        valid = (x[split:], v[split:], dv[split:])
-        return train, valid
 
     # ------------------------------------------------------------------ #
     # State management
@@ -226,25 +210,8 @@ class SemiconcaveModel:
 
     def _compute_loss(self, x, V, dV):
         Vp, dVp = self.predict_tensors(x)
-        N, d = x.shape
-        Nx = N * d
-        w1, w2 = self.loss_weights
-        value_loss = torch.sum((Vp - V) ** 2) / (2 * Nx)
-        grad_loss = torch.sum((dVp - dV) ** 2) / (2 * Nx)
-        data = w1 * value_loss + w2 * grad_loss
+        data, value_loss, grad_loss = data_loss_terms(Vp, dVp, V, dV, self.loss_weights)
         return data + self._penalty(), value_loss, grad_loss
-
-    @torch.no_grad()
-    def _compute_relative_errors(self, x, V, dV):
-        Vp, dVp = self.predict_tensors(x)
-        v_diff = torch.sum((Vp - V) ** 2)
-        dv_diff = torch.sum((dVp - dV) ** 2)
-        v_ref = torch.sum(V ** 2).clamp_min(1e-30)
-        dv_ref = torch.sum(dV ** 2).clamp_min(1e-30)
-        err_l2 = torch.sqrt(v_diff / v_ref)
-        err_grad = torch.sqrt(dv_diff / dv_ref)
-        err_h1 = torch.sqrt((v_diff + dv_diff) / (v_ref + dv_ref))
-        return float(err_l2), float(err_grad), float(err_h1)
 
     # ------------------------------------------------------------------ #
     # Warm-start (nonnegative coordinate descent for new atoms) + uniform
