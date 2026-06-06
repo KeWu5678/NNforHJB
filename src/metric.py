@@ -88,7 +88,7 @@ def print_experiment_hyperparameters(results: Sequence[dict] | str | os.PathLike
     result_list = _load_results(results)
 
     HPARAM_KEYS = ("alpha", "power", "activation", "loss_weights", "use_sphere",
-                   "optimizer", "num_iterations", "num_insertion", "threshold")
+                   "optimizer", "num_iterations", "num_insertion")
 
     # All results share the same hyperparameters (except gamma), so use the first
     r0 = result_list[0]

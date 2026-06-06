@@ -39,7 +39,6 @@ import src.config.store  # noqa: F401  — registers `config_schema` with Hydra'
 from src.PDAP import PDAP
 from src.experiment_logging import ExperimentRun
 from src.logging_config import configure_logging
-from src.paths import DATA_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -48,19 +47,6 @@ def set_seed(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-
-
-def load_dataset(path: Path) -> dict:
-    """Load a value/gradient dataset with ``x``, ``v``, and ``dv`` arrays."""
-    raw = np.load(path, allow_pickle=True)
-    return {
-        "x": np.asarray(raw["x"], dtype=np.float64),
-        "v": np.asarray(raw["v"], dtype=np.float64),
-        "dv": np.asarray(raw["dv"], dtype=np.float64),
-    }
 
 
 @hydra.main(version_base=None, config_path="../conf", config_name="config")
@@ -68,13 +54,18 @@ def main(cfg: DictConfig) -> None:
     configure_logging(verbose=cfg.env.verbose, level=cfg.env.log_level, log_file=cfg.env.log_file)
     set_seed(cfg.env.seed)
 
-    data_path = Path(cfg.data.path)
-    if not data_path.is_absolute():
-        data_path = DATA_DIR / data_path
-    data = load_dataset(data_path)
-    logger.info("loaded %s  (N=%d, d=%d)", data_path.name, data["x"].shape[0], data["x"].shape[1])
+    # Create the run record before model construction/training so elapsed_s covers
+    # the actual run, not only JSON serialization.
+    run_dir = Path(HydraConfig.get().runtime.output_dir)
+    run = ExperimentRun(
+        output_dir=run_dir,
+        name=cfg.name,
+        run_id=f"{cfg.model.kind}_{cfg.model.insertion}_seed{cfg.env.seed}",
+        config=OmegaConf.to_container(cfg, resolve=True),
+    )
 
-    pdap = PDAP.from_config(cfg, data)
+    pdap = PDAP.from_config(cfg)
+    logger.info("loaded %s  (d=%d)", cfg.data.path, pdap.input_dim)
     result = pdap.fit_from_config(cfg.training, verbose=cfg.env.verbose)
 
     # Report the relative errors + sparsity metrics at the selected best iteration.
@@ -97,13 +88,6 @@ def main(cfg: DictConfig) -> None:
 
     # Persist a run record into Hydra's per-run output dir (Hydra also writes
     # .hydra/config.yaml). Experiment-tracking config is deferred.
-    run_dir = Path(HydraConfig.get().runtime.output_dir)
-    run = ExperimentRun(
-        output_dir=run_dir,
-        name=cfg.name,
-        run_id=f"{cfg.model.kind}_{cfg.model.insertion}_seed{cfg.env.seed}",
-        config=OmegaConf.to_container(cfg, resolve=True),
-    )
     run.log_metrics(metrics)
     record = run.finish(status="completed")
     logger.info("run record: %s", record)

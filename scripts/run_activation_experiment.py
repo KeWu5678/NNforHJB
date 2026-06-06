@@ -23,6 +23,7 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from src.PDAP import PDAP
 from src.config.activations import ACTIVATIONS
+from src.config.schema import EnvConfig, ExperimentConfig, ModelConfig, TrainingConfig
 from src.experiment_logging import RunRecordWriter
 from src.logging_config import configure_logging
 from src.paths import DATA_DIR
@@ -33,10 +34,9 @@ logger = logging.getLogger(__name__)
 GAMMAS = [0, 1e-2, 1e-1, 1, 10]
 ALPHA = 1e-5
 POWER = 1.0
-LOSS_WEIGHTS = "h1"
+LOSS_WEIGHTS = (1.0, 1.0)
 NUM_ITERATIONS = 10
 NUM_INSERTION = 50
-PRUNING_THRESHOLD = 1e-5
 DATA_PATH = DATA_DIR / "VDP_beta_0.1_grid_30x30.npy"
 
 RUN_RECORD = RunRecordWriter(
@@ -61,9 +61,6 @@ def set_seed(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
 
 
 def load_data() -> dict:
@@ -82,26 +79,30 @@ def main() -> int:
     p.add_argument("--seed", type=int, required=True)
     p.add_argument("--num-iterations", type=int, default=NUM_ITERATIONS)
     p.add_argument("--num-insertion",  type=int, default=NUM_INSERTION)
+    p.add_argument("--use-sphere", action="store_true",
+                   help="sample candidate directions on S^d (only for positively-homogeneous activations)")
     p.add_argument("--output-dir", type=Path, default=None)
     args = p.parse_args()
 
-    activation_fn, use_sphere = ACTIVATIONS[args.activation]
     data = load_data()
 
     per_gamma = []
     t0 = time.time()
     for gamma in GAMMAS:
         set_seed(args.seed)
-        pdpa = PDAP(
-            data=data, alpha=ALPHA, gamma=gamma, power=POWER,
-            model="signed", insertion="profile",
-            activation=activation_fn, use_sphere=use_sphere,
-            loss_weights=LOSS_WEIGHTS, verbose=False,
+        cfg = ExperimentConfig(
+            model=ModelConfig(
+                kind="signed", insertion="profile", activation=args.activation,
+                power=POWER, loss_weights=tuple(LOSS_WEIGHTS), use_sphere=args.use_sphere,
+                alpha=ALPHA, gamma=gamma,
+            ),
+            training=TrainingConfig(num_iterations=args.num_iterations, num_insertion=args.num_insertion),
+            env=EnvConfig(verbose=False),
         )
+        pdpa = PDAP(cfg, data)
         result = pdpa.fit(
             num_iterations=args.num_iterations,
             num_insertion=args.num_insertion,
-            threshold=PRUNING_THRESHOLD,
             verbose=False,
         )
         bi = result["best_iteration"]
@@ -120,7 +121,7 @@ def main() -> int:
         "num_insertion": args.num_insertion,
         "power":      POWER,
         "loss":       LOSS_WEIGHTS,
-        "use_sphere": use_sphere,
+        "use_sphere": args.use_sphere,
         "elapsed_s":  round(time.time() - t0, 2),
         "per_gamma":  per_gamma,
         "best_gamma": best["gamma"],

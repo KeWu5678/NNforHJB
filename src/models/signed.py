@@ -9,7 +9,6 @@ Created on Tue Dec  3 18:30:52 2024
 from typing import Optional, Tuple
 import logging
 import torch
-import os
 from ..SSN import SSN
 from ..SSN.penalty import _phi
 from ..SSN.prox import _phi_prox
@@ -56,6 +55,7 @@ class SignedModel:
         self.optimizer_type = optimizer
         self.activation = activation
         self.power = power
+        self.q = 2.0 / (self.power + 1.0)
         self.alpha = alpha
         self.gamma = gamma
         self.lr = lr
@@ -79,8 +79,7 @@ class SignedModel:
         self.optimizer = None  # Will store the actual optimizer instance (standard PyTorch convention)
         self.loss_history = {'train_loss': [], 'val_loss': [], 'value_loss': [], 'grad_loss': []}
         self.last_fit_summary = {}
-        self.config = None
-        
+
         # High-level setup is logged by PDAP after the data has been prepared.
     
     def _prepare_data(self, data: dict) -> Tuple[Tuple[torch.Tensor, torch.Tensor, torch.Tensor], Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
@@ -177,7 +176,7 @@ class SignedModel:
     def _setup_optimizer(self) -> None:
         """Setup the optimizer based on optimizer type."""
         if self.optimizer_type in ["SSN", "SSN_TR"]:
-            if self.train_outerweights == True:
+            if self.train_outerweights:
                 output_params = [self.net.output.weight]
                 # SSN_TR folded into SSN as the trust-region (Steihaug-CG) method;
                 # an explicit configured method overrides the optimizer_type shorthand.
@@ -193,11 +192,11 @@ class SignedModel:
                 if self.verbose:
                     logger.debug(
                         "Output-weight solver  method=%s  alpha=%.2e  gamma=%.2e  penalty_mix=%.2f  lr=%.2g",
-                        self.optimizer_type, self.alpha, self.gamma, self.th, self.lr,
+                        method, self.alpha, self.gamma, self.th, self.lr,
                     )
             else:
                 # SSN optimizer is for outerweights only
-                logger.debug(f"SSN optimizer is for outerweights only")
+                logger.debug("SSN optimizer is for outerweights only")
         else:
             output_params = [self.net.output.weight] if self.train_outerweights else self.net.parameters()
             optimizer_class = getattr(torch.optim, self.optimizer_type, None)
@@ -243,8 +242,7 @@ class SignedModel:
         # Full objective: data loss + regularization
         # Matches MATLAB SSN.m line 34: obj = @(u) F.F(Sred*u - ref) + alpha*sum(phi.phi(computeNorm(u, NQ)))
         abs_u = torch.abs(self.net.output.weight)
-        q = 2.0 / (self.power + 1.0)
-        reg_arg = abs_u ** q if q != 1.0 else abs_u
+        reg_arg = abs_u ** self.q if self.q != 1.0 else abs_u
         total_loss = data_loss + self.alpha * torch.sum(_phi(reg_arg, self.th, self.gamma))
  
         return total_loss, value_loss, grad_loss
@@ -417,11 +415,12 @@ class SignedModel:
         Train the model on the provided data.
 
         Args:
-            data: Dictionary with keys 'x', 'v', 'dv'
+            data_train: Training tensors (x, v, dv)
+            data_valid: Validation tensors (x, v, dv)
             inner_weights: Pre-defined inner weights (optional)
             inner_bias: Pre-defined inner bias (optional)
+            outer_weights: Pre-defined outer weights (optional)
             iterations: Number of training iterations (default: 5000)
-            batch_size: Batch size (default: 1620)
             display_every: Display frequency (default: 1000)
 
         Returns:
@@ -450,8 +449,7 @@ class SignedModel:
         
         # Reset loss history
         self.loss_history = {'train_loss': [], 'val_loss': [], 'value_loss': [], 'grad_loss': []}
-        # Track and save running best model by validation loss
-        best_val_loss = float('inf')
+        # Track and save the running best model by training loss.
         best_train_loss = float('inf')
         best_epoch = -1
         # Ensure best_state is always defined (e.g. iterations == 0)
@@ -500,13 +498,6 @@ class SignedModel:
                 # Snapshot a real checkpoint (not just a view into current params)
                 best_state = {k: v.detach().clone() for k, v in self.net.state_dict().items()}
 
-            val_loss, val_value_loss, val_grad_loss = self._compute_loss(valid_x_tensor, valid_v_tensor, valid_dv_tensor)
-            # if val_loss.item() < best_val_loss:
-            #     best_val_loss = val_loss.item()
-            #     best_epoch = epoch
-            #     # Snapshot a real checkpoint (not just a view into current params)
-            #     best_state = {k: v.detach().clone() for k, v in self.net.state_dict().items()}
-
             # Early-stop SSN training if line search fails repeatedly
             if isinstance(self.optimizer, SSN):
                 step_success = bool(getattr(self.optimizer, "last_step_success", True))
@@ -514,7 +505,7 @@ class SignedModel:
                     consecutive_failed_ssn_steps += 1
                     if self.verbose:
                         max_ls_iter = self.optimizer.param_groups[0]['max_ls_iter']
-                        logger.warning(
+                        logger.debug(
                             f"SSN step rejected (consecutive={consecutive_failed_ssn_steps}/{max_consecutive_failed_ssn_steps}, max_ls_iter={max_ls_iter})"
                         )
                 else:
@@ -523,14 +514,17 @@ class SignedModel:
 
                 if consecutive_failed_ssn_steps >= max_consecutive_failed_ssn_steps:
                     if self.verbose:
-                        logger.warning(
-                            f"Early stopping: SSN line search failed for {max_consecutive_failed_ssn_steps} consecutive epochs. "
-                            f"Restoring best model at epoch {best_epoch} (val={best_val_loss:.6f})."
+                        logger.info(
+                            f"SSN early stop: line search stalled {max_consecutive_failed_ssn_steps} epochs; "
+                            f"restored best epoch {best_epoch} (train={best_train_loss:.3e})."
                         )
                     break
             
             # log the loss
             if epoch % display_every == 0:
+                val_loss, val_value_loss, val_grad_loss = self._compute_loss(
+                    valid_x_tensor, valid_v_tensor, valid_dv_tensor
+                )
                 if self.verbose:
                     logger.debug("  %6d %-14.6e %-14.6e", epoch, loss.item(), val_loss.item())
                 self.loss_history['train_loss'].append(loss.item())

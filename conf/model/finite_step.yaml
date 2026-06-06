@@ -5,4 +5,4 @@ kind: signed
 insertion: finite_step
 activation: relu
 power: 2.0
-loss_weights: h1
+loss_weights: [1.0, 1.0]   # [w1, w2] = [value, gradient]; l2 = [1.0, 0.0]

@@ -19,9 +19,7 @@ training:
   num_iterations: 10
   num_insertion: 50
   max_insert: 15
-  threshold: 1e-5
-  prune_merge_tol: 1e-3
-  decorrelation: true
+  prune_amp_tol: 1e-8
   lr: 1.0
   method: levenberg_marquardt
   max_ls_iter: 500

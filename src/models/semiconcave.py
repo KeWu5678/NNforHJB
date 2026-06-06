@@ -40,7 +40,7 @@ class SemiconcaveModel:
         power: float = 1.0,
         th: float = 0.5,
         activation: Callable[[torch.Tensor], torch.Tensor] | None = None,
-        loss_weights: str | Tuple[float, float] = "h1",
+        loss_weights: Tuple[float, float] = (1.0, 1.0),
         lr: float = 1.0,
         c_init: float = 1.0,
         verbose: bool = True,
@@ -62,7 +62,6 @@ class SemiconcaveModel:
         self.lr = float(lr)
         self.verbose = verbose
         self.dtype = dtype
-        self.optimizer_type = "SSN_semiconcave"
         # SSN solver settings (default to today's literals)
         self.method = method
         self.max_ls_iter = max_ls_iter
@@ -70,9 +69,6 @@ class SemiconcaveModel:
         self.tolerance_grad = tolerance_grad
         self.sigmamax = sigmamax
 
-        if isinstance(loss_weights, str):
-            mapping = {"l2": (1.0, 0.0), "h1": (1.0, 1.0)}
-            loss_weights = mapping[loss_weights.lower()]
         self.loss_weights = (float(loss_weights[0]), float(loss_weights[1]))
 
         # Atom state (frozen inner weights + nonneg outer weights).
@@ -172,7 +168,7 @@ class SemiconcaveModel:
         Phi_g = torch.cat(cols_g, dim=1)
         return Phi_v, Phi_g, n
 
-    def _theta_vector(self, n: int, d: int) -> torch.Tensor:
+    def _theta_vector(self, n: int) -> torch.Tensor:
         parts = []
         if n > 0:
             parts.append(self.c.reshape(-1))
@@ -270,7 +266,7 @@ class SemiconcaveModel:
         w1, w2 = self.loss_weights
         n_new = W_new.shape[0]
         if n_new == 0:
-            return torch.zeros(0, dtype=torch.float64)
+            return torch.zeros(0, dtype=self.dtype)
 
         Vp, dVp = self.predict_tensors(X)
         res_v = (Vp - V).reshape(-1)
@@ -339,7 +335,7 @@ class SemiconcaveModel:
 
         H = (w1 / Nx) * (Phi_v.T @ Phi_v) + (w2 / Nx) * (Phi_g.T @ Phi_g)
 
-        theta = torch.nn.Parameter(self._theta_vector(n, d))
+        theta = torch.nn.Parameter(self._theta_vector(n))
         penalized, nonneg = self._masks(n, d)
 
         optimizer = SSN(

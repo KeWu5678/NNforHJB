@@ -1,37 +1,16 @@
-name: activationsearch
-
-data:
-  path: VDP_beta_0.1_grid_30x30.npy
-  normalize: true
-
-seeds: [42]
-activations: [tanh, softplus, matern52, gaussian]
-losses: [l2, h1]
-gammas: [0, 0.01, 0.1, 1, 10]
+# @package _global_
+# activationsearch experiment: signed/profile PDAP on normalized VDP data with
+# non-homogeneous activations (use_sphere=false). This file pins the *fixed*
+# settings; the swept axes (activation / gamma / loss_weights / seed) are passed
+# on the CLI via Hydra multirun — see `make activationsearch`.
 
 model:
   kind: signed
   insertion: profile
-  alpha: 1e-5
   power: 1.0
+  alpha: 1e-5
+  use_sphere: false
 
-training:
-  num_iterations: 10
-  num_insertion: 50
-  max_insert: 15
-  threshold: 1e-5
-  prune_merge_tol: 1e-3
-  decorrelation: false
-  lr: 1.0
-  method: levenberg_marquardt
-  max_ls_iter: 500
-  tolerance_ls: 1.00000001
-  tolerance_grad: 0.0
-  sigmamax: 10.0
-  fit_outer_iterations: 20
-  display_every: 2
-  ins_merge_tol: 1e-2
-  lbfgs_lr: 1e-2
-  lbfgs_steps: 200
-  newton_tol: 1e-12
-  newton_max_iter: 50
+data:
+  path: VDP_beta_0.1_grid_30x30.npy
+  normalize: true

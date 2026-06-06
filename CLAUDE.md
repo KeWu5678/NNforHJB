@@ -20,7 +20,10 @@ Thesis & papers: `/Users/chaoruiz/Documents/NotePaper/MasterThesis/`
 
 ## Directory Notes
 - `src/` — active code; `scripts/` — experiment runners & dataset generators (index in `vault/algorithm.md`).
-- `autoresearch/` — research outputs (per-direction subfolders + summaries).
+- `experiments/` — curated experiment definitions, results, and promoted figures.
+- `notebook/` — curated explanatory notebooks for SSN, PDAP configuration, and selected result views.
+- `docs/research-directions.md` — restored provenance log for the research-direction summaries.
+- `autoresearch/` — legacy research outputs; migrate from here into curated experiment docs before adding new summaries.
 - `vault/` — layered technical docs (this file links them).
 - `rawdata/` — generated datasets/plots; `outdated/` — deprecated experiments.
 - `CONTEXT.md` — domain language / example-selection notes for the open-loop study.

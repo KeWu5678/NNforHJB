@@ -12,5 +12,3 @@ Best gamma per activation/loss/seed
 | softplus   | l2   | 42   | 0.01  | 50      | 6.12e-01 | 3.06e+01 |
 | tanh       | h1   | 42   | 0.01  | 64      | 1.85e-01 | 1.18e+01 |
 | tanh       | l2   | 42   | 1     | 48      | 5.82e-01 | 2.80e+01 |
-
-Generated from Run Records and fit-result artifacts.

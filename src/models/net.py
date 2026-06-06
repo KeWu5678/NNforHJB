@@ -14,7 +14,7 @@ class ShallowNetwork(nn.Module):
         p (float): power for activation function (default: 2)
         inner_weights (array, optional): pre-defined hidden weights
         inner_bias (array, optional): pre-defined hidden bias
-        regularization (tuple, optional): regularization parameters
+        outer_weights (array, optional): pre-defined output weights
     """
     
     def __init__(
