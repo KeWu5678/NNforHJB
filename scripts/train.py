@@ -54,6 +54,16 @@ def main(cfg: DictConfig) -> None:
     configure_logging(verbose=cfg.env.verbose, level=cfg.env.log_level, log_file=cfg.env.log_file)
     set_seed(cfg.env.seed)
 
+    # Create the run record before model construction/training so elapsed_s covers
+    # the actual run, not only JSON serialization.
+    run_dir = Path(HydraConfig.get().runtime.output_dir)
+    run = ExperimentRun(
+        output_dir=run_dir,
+        name=cfg.name,
+        run_id=f"{cfg.model.kind}_{cfg.model.insertion}_seed{cfg.env.seed}",
+        config=OmegaConf.to_container(cfg, resolve=True),
+    )
+
     pdap = PDAP.from_config(cfg)
     logger.info("loaded %s  (d=%d)", cfg.data.path, pdap.input_dim)
     result = pdap.fit_from_config(cfg.training, verbose=cfg.env.verbose)
@@ -78,13 +88,6 @@ def main(cfg: DictConfig) -> None:
 
     # Persist a run record into Hydra's per-run output dir (Hydra also writes
     # .hydra/config.yaml). Experiment-tracking config is deferred.
-    run_dir = Path(HydraConfig.get().runtime.output_dir)
-    run = ExperimentRun(
-        output_dir=run_dir,
-        name=cfg.name,
-        run_id=f"{cfg.model.kind}_{cfg.model.insertion}_seed{cfg.env.seed}",
-        config=OmegaConf.to_container(cfg, resolve=True),
-    )
     run.log_metrics(metrics)
     record = run.finish(status="completed")
     logger.info("run record: %s", record)

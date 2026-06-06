@@ -34,6 +34,7 @@ htmlcov/
 
 # ---- Logs ----
 *.log
+multirun/
 
 # ---- OS junk ----
 .DS_Store

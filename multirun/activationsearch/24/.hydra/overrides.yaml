@@ -1,6 +1,0 @@
-- +experiment=activationsearch
-- env.verbose=True
-- env.seed=42
-- model.activation=matern52
-- model.gamma=0.1
-- model.loss_weights=[1.0,0.0]

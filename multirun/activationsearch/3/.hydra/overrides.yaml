@@ -1,6 +1,0 @@
-- +experiment=activationsearch
-- env.verbose=True
-- env.seed=42
-- model.activation=tanh
-- model.gamma=0.01
-- model.loss_weights=[1.0,1.0]

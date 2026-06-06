@@ -24,7 +24,7 @@ from src.metric import format_table
 from src.plots import plot_score_tradeoff
 
 EXPERIMENT = "activationsearch"
-MULTIRUN_DIR = REPO_ROOT / "multirun" / EXPERIMENT
+MULTIRUN_DIR = REPO_ROOT / "rawdata" / "logs" / "multirun" / EXPERIMENT
 OUTPUT_DIR = REPO_ROOT / "experiments" / EXPERIMENT
 
 # Readable label for the swept loss_weights pair.

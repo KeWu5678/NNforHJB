@@ -9,8 +9,12 @@ still catching real drift).
 Golden values: ``tests/fixtures/pdap_golden.npz``.  Regenerate from a known-good
 tree with ``PDAP_UPDATE_GOLDEN=1 pytest tests/test_pdap_equivalence.py``.
 
-Note: the semiconcave baseline was deliberately re-captured when its insertion
-was unified onto the shared ``profile_threshold`` strategy.
+Notes:
+- the semiconcave baseline was deliberately re-captured when its insertion was
+  unified onto the shared ``profile_threshold`` strategy.
+- the finite-step baseline was re-captured when PDAP pruning changed from
+  duplicate-merge pruning to amplitude-only pruning; this keeps one additional
+  atom in the short characterization run.
 """
 
 from __future__ import annotations

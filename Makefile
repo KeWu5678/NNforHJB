@@ -12,7 +12,7 @@ help:  ## list targets
 
 activationsearch:  ## reproduce: Hydra multirun sweep (signed/profile, VDP) + analysis
 	$(PY) scripts/train.py -m +experiment=activationsearch \
-	  hydra.sweep.dir=multirun/activationsearch \
+	  hydra.sweep.dir=rawdata/logs/multirun/activationsearch \
 	  env.verbose=$(VERBOSE) \
 	  env.seed=42 \
 	  model.activation=tanh,softplus,matern52,gaussian \
