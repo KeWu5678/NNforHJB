@@ -6,8 +6,9 @@ One ``PDAP`` class is configured by two explicit axes:
   * ``insertion`` — ``"profile"`` (dual-threshold) or ``"finite_step"`` (Delta J < 0).
 
 The loop is model-agnostic: it drives the model through the uniform interface
-(``set_atoms`` / ``get_atoms`` / ``warm_start`` / ``fit_outer_weights`` /
-``predict_tensors``) and the insertion strategy through :mod:`insertion`.
+(``set_atoms`` / ``get_atoms`` / ``fit_outer_weights`` / ``predict_tensors``),
+the insertion strategy through :mod:`insertion`, and the warm start through
+:mod:`warmstart` (a trainer step, not model state).
 
   init:  insert -> warm-start -> set_atoms
   loop:  fit_outer_weights -> get_atoms -> prune -> set_atoms -> record
@@ -19,13 +20,13 @@ from __future__ import annotations
 import logging
 from typing import Dict, List, Tuple
 
-import numpy as np
 import torch
 
 from ..models.signed import SignedModel
 from ..models.semiconcave import SemiconcaveModel
 from ..eval import relative_errors
 from .insertion import profile_threshold, finite_step
+from .warmstart import warm_start
 
 logger = logging.getLogger(__name__)
 
@@ -186,19 +187,34 @@ class PDAP:
     # The insertion-candidate merge tolerance (self.ins_merge_tol, default 1e-2)
     # is independent of the prune amplitude gate (fit's amp_tol, used only in
     # prune_small_weights to drop negligible atoms).
-    def _insert(self, num_insertion: int, max_insert: int, verbose: bool):
-        """Return (W, b, c) where c is None for the profile strategy (needs warm-start)."""
-        X, V, dV = self.data_train
-        # Residual = current prediction - target.  The semiconcave model predicts
-        # its envelope even with no atoms; the signed network has no prediction
-        # until its net is built (then residual = -target, the zero network).
+    def _residual(self, data) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Return ``(prediction - target)`` for value and gradient.
+
+        The semiconcave model predicts its envelope even with no atoms; the signed
+        network has no prediction until its net is built, in which case the
+        residual is ``-target`` (the zero network).
+        """
+        X, V, dV = data
         try:
             Vp, dVp = self.model.predict_tensors(X)
-            res_v = (Vp - V).detach()
-            res_dv = (dVp - dV).detach()
+            return (Vp - V).detach(), (dVp - dV).detach()
         except RuntimeError:
-            res_v = -V.detach()
-            res_dv = -dV.detach()
+            return -V.detach(), -dV.detach()
+
+    def _warm_start(self, W: torch.Tensor, b: torch.Tensor, verbose: bool) -> torch.Tensor:
+        """Coordinate-descent initial outer weights for new atoms (W, b)."""
+        return warm_start(
+            W, b, self._residual(self.data_train), self.data_train[0],
+            activation=self.activation_fn, power=self.model.power,
+            loss_weights=self.model.loss_weights, alpha=self.alpha,
+            th=self.model.th, gamma=self.model.gamma,
+            use_sphere=self._use_sphere, nonneg=not self.two_sided, verbose=verbose,
+        )
+
+    def _insert(self, num_insertion: int, max_insert: int, verbose: bool):
+        """Return (W, b, c) where c is None for the profile strategy (needs warm-start)."""
+        X = self.data_train[0]
+        res_v, res_dv = self._residual(self.data_train)
         existing = None
         if self.model.n_neurons > 0:
             Wc, bc, _ = self.model.get_atoms()
@@ -243,10 +259,10 @@ class PDAP:
         if W.shape[0] == 0:
             raise RuntimeError("PDAP: initial insertion accepted no atoms")
         if c is None:  # profile strategy: nonneg/signed coordinate-descent warm-start.
-            # warm_start computes its own residual (signed: zero network -> -target;
-            # semiconcave: the envelope, valid with no atoms), so no eager net build
-            # is needed here -- keeping the signed RNG sequence aligned with the loop.
-            c = self.model.warm_start(W, b, self.data_train, use_sphere=self._use_sphere, verbose=verbose)
+            # The residual is read from the current model (signed: zero network ->
+            # -target; semiconcave: the envelope, valid with no atoms), so no eager
+            # net build is needed here -- keeping the signed RNG sequence aligned.
+            c = self._warm_start(W, b, verbose)
         else:
             c = torch.as_tensor(c, dtype=torch.float64).reshape(-1)
         self.model.set_atoms(W, b, c)
@@ -317,7 +333,7 @@ class PDAP:
             b_new = torch.as_tensor(b_np, dtype=torch.float64)
             if W_new.shape[0] > 0:
                 if c_new is None:
-                    c_new = self.model.warm_start(W_new, b_new, self.data_train, use_sphere=self._use_sphere, verbose=verbose)
+                    c_new = self._warm_start(W_new, b_new, verbose)
                 else:
                     c_new = torch.as_tensor(c_new, dtype=torch.float64).reshape(-1)
                 W = torch.cat([W, W_new], dim=0)

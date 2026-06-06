@@ -11,7 +11,6 @@ import logging
 import torch
 from ..SSN import SSN
 from ..SSN.penalty import _phi
-from ..SSN.prox import _phi_prox
 from ..eval import data_loss_terms
 from .net import ShallowNetwork
 
@@ -187,83 +186,6 @@ class SignedModel:
     @property
     def n_neurons(self) -> int:
         return 0 if self.net is None else int(self.net.hidden.weight.shape[0])
-
-    def warm_start(
-        self,
-        W_new: torch.Tensor,
-        b_new: torch.Tensor,
-        data_train: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
-        use_sphere: bool = True,
-        verbose: bool = True,
-    ) -> torch.Tensor:
-        """Coordinate-descent initial outer weights for new neurons, shape (n_new,).
-
-        1D proximal step along the combined new-atom direction against the current
-        model residual (MATLAB PDAPmultisemidiscrete.m:104-147).  Residual is taken
-        from the current network (or -target when no atoms exist yet).
-        """
-        X_train, V_train, dV_train = data_train
-        N, d = X_train.shape[0], X_train.shape[1]
-        Nx = N * d
-        p = self.power
-        w1, w2 = self.loss_weights
-        alpha, th, gamma = self.alpha, self.th, self.gamma
-        n_new = W_new.shape[0]
-        if n_new == 0:
-            return torch.zeros(0, dtype=torch.float64)
-
-        X_det = X_train.detach()
-        if self.net is not None:
-            pred_v, pred_dv = self.predict_tensors(X_det)
-            res_val = (pred_v - V_train).detach().reshape(-1)
-            res_grad = (pred_dv - dV_train).detach().reshape(-1)
-        else:
-            res_val = -V_train.detach().reshape(-1)
-            res_grad = -dV_train.detach().reshape(-1)
-
-        with torch.no_grad():
-            pre = X_det @ W_new.T + b_new
-            act = self.activation(pre)
-            S_val_new = act ** p
-            if use_sphere:
-                act_deriv = (pre > 0).double()
-            else:
-                pre_tmp = pre.detach().requires_grad_(True)
-                with torch.enable_grad():
-                    act_tmp = self.activation(pre_tmp)
-                    act_deriv = torch.autograd.grad(act_tmp.sum(), pre_tmp, create_graph=False)[0].detach()
-            dS_dz = act_deriv if p == 1.0 else p * act ** (p - 1) * act_deriv
-            dS_dx = dS_dz.unsqueeze(2) * W_new.unsqueeze(0)
-            S_grad_new = dS_dx.permute(0, 2, 1).reshape(-1, n_new)
-
-            profiles = (w1 / Nx) * (S_val_new.T @ res_val) + (w2 / Nx) * (S_grad_new.T @ res_grad)
-            abs_profiles = profiles.abs()
-            best_idx = int(abs_profiles.argmax().item())
-            eps_sqrt = float(torch.finfo(torch.float64).eps) ** 0.5
-            safe_abs = abs_profiles.clamp_min(1e-30)
-            coeff = -eps_sqrt * profiles / safe_abs
-            coeff[best_idx] = -profiles[best_idx] / safe_abs[best_idx]
-
-            Kvhat_val = S_val_new @ coeff
-            Kvhat_grad = S_grad_new @ coeff
-            phat = float((w1 / Nx) * Kvhat_val.dot(res_val) + (w2 / Nx) * Kvhat_grad.dot(res_grad))
-            what = float((w1 / Nx) * Kvhat_val.dot(Kvhat_val) + (w2 / Nx) * Kvhat_grad.dot(Kvhat_grad))
-
-            if phat <= -alpha and what > 1e-30:
-                tau = _phi_prox(alpha / what, -phat / what, th, gamma, q=2.0 / (p + 1.0))
-            else:
-                tau = 0.0
-            W_outer_new = tau * coeff
-            if verbose:
-                logger.debug(
-                    "Warm start        initialized %d new output weights  max |weight|=%.2e",
-                    n_new, float(W_outer_new.abs().max().item()),
-                )
-                logger.debug(
-                    "Warm-start details: descent_score=%.2e curvature=%.2e step=%.4e min_abs_weight=%.2e",
-                    -phat, what, tau, float(W_outer_new.abs().min().item()),
-                )
-        return W_outer_new.reshape(-1)
 
     def fit_outer_weights(
         self,

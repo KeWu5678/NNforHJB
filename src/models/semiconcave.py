@@ -24,7 +24,6 @@ import torch
 
 from ..SSN import SSN
 from ..SSN.penalty import _phi
-from ..SSN.prox import _phi_prox
 from ..eval import data_loss_terms
 
 logger = logging.getLogger(__name__)
@@ -212,65 +211,6 @@ class SemiconcaveModel:
         Vp, dVp = self.predict_tensors(x)
         data, value_loss, grad_loss = data_loss_terms(Vp, dVp, V, dV, self.loss_weights)
         return data + self._penalty(), value_loss, grad_loss
-
-    # ------------------------------------------------------------------ #
-    # Warm-start (nonnegative coordinate descent for new atoms) + uniform
-    # training entry, matching the PDAP Model interface.
-    # ------------------------------------------------------------------ #
-    def warm_start(
-        self,
-        W_new: torch.Tensor,
-        b_new: torch.Tensor,
-        data_train: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
-        use_sphere: bool = True,
-        verbose: bool = True,
-    ) -> torch.Tensor:
-        """Nonnegative coordinate-descent initial outer weights c_new >= 0 (n_new,)."""
-        X, V, dV = data_train
-        K, d = X.shape
-        Nx = K * d
-        p = self.power
-        w1, w2 = self.loss_weights
-        n_new = W_new.shape[0]
-        if n_new == 0:
-            return torch.zeros(0, dtype=self.dtype)
-
-        Vp, dVp = self.predict_tensors(X)
-        res_v = (Vp - V).reshape(-1)
-        res_dv = (dVp - dV).reshape(-1)
-
-        with torch.no_grad():
-            pre = X @ W_new.T + b_new
-            act = self.activation(pre)
-            S_val = act ** p
-            if use_sphere:
-                dz = (pre > 0).double()
-            else:
-                pt = pre.detach().requires_grad_(True)
-                with torch.enable_grad():
-                    at = self.activation(pt)
-                    dz = torch.autograd.grad(at.sum(), pt)[0].detach()
-            dS_dz = dz if p == 1.0 else p * act ** (p - 1) * dz
-            S_grad = (dS_dz.unsqueeze(2) * W_new.unsqueeze(0)).permute(0, 2, 1).reshape(-1, n_new)
-
-            profiles = (w1 / Nx) * (S_val.T @ res_v) + (w2 / Nx) * (S_grad.T @ res_dv)
-            abs_p = profiles.abs()
-            best = int(abs_p.argmax().item())
-            eps_sqrt = float(torch.finfo(torch.float64).eps) ** 0.5
-            safe = abs_p.clamp_min(1e-30)
-            coeff = eps_sqrt * profiles / safe
-            coeff[best] = profiles[best] / safe[best]
-
-            Kv = S_val @ coeff
-            Kg = S_grad @ coeff
-            phat = -((w1 / Nx) * Kv.dot(res_v) + (w2 / Nx) * Kg.dot(res_dv))
-            what = (w1 / Nx) * Kv.dot(Kv) + (w2 / Nx) * Kg.dot(Kg)
-            if phat <= -self.alpha and what > 1e-30:
-                tau = _phi_prox(self.alpha / what, -phat / what, self.th, self.gamma, q=self.q)
-            else:
-                tau = 0.0
-            c_new = (tau * coeff).clamp_min(0.0)
-        return c_new.reshape(-1)
 
     def fit_outer_weights(
         self,
