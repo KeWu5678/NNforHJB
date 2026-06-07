@@ -82,3 +82,37 @@ same operations the analytic feature maps did). The result: the duplication is
 gone, the layering inversion is fixed (neither model imports the SSN optimizer),
 evaluation has a single home, and the trainer depends on one explicit model
 contract.
+
+## Follow-up: models as nn.Modules; objective/solver config out of the model
+
+Pushing the same principle (model = parametrization, use the framework) further,
+three more steps, all bit-exact:
+
+7. **Both models are `nn.Module`s.** `SignedModel` *subclasses* `ShallowNetwork`
+   (it is the shallow net, not a wrapper around `self.net`); `SemiconcaveModel`
+   is an `nn.Module` with `c, C, a, b0` as parameters registered in θ-order and
+   `W, b` as buffers. `theta` (the SSN working vector) is just the trainable
+   parameters, read/written with torch's `parameters_to_vector` /
+   `vector_to_parameters` — so `get_theta` / `set_theta` leave the contract.
+8. **The objective leaves the model.** `compute_loss` is removed; the trainer
+   computes the objective (`PDAP._record_loss` for the data term via
+   `src.eval.data_loss_terms`, plus `src.PDAP.ssn_solve.nonconvex_penalty` for the
+   regularizer — the same penalty the SSN closure uses, so it exists once).
+9. **Objective and solver hyperparameters leave the model.** `alpha, gamma, th,
+   loss_weights` and `lr, method, max_ls_iter, tolerance_*, sigmamax` move into
+   trainer dataclasses (`Objective`, `SolverConfig` in `ssn_solve`), built by PDAP
+   from config and threaded to the solve / warm-start / recording. Model
+   constructors take only forward-defining parameters (`activation`, `power`,
+   plus `c_init`/`dtype` for semiconcave); `power` stays because it defines
+   `σ^p` and induces `q = 2/(power+1)`.
+
+The `PDAPModel` contract is now minimal: `power, q, input_dim, last_fit_summary`,
+`parameters()`, and the methods `set_atoms / get_atoms / predict / predict_tensors
+/ jacobians / penalty_masks`. `jacobians` and `penalty_masks` are the only
+model-specific surface the trainer can't obtain from `nn.Module` built-ins —
+`jacobians` is the feature-map computation, `penalty_masks` the irreducible
+penalty/nonneg structure (the nonneg part *is* semiconcavity, so it cannot be
+flattened away). Bit-exactness held because building `nn.Parameter`s consumes no
+RNG (unlike `nn.Linear`, whose draw `set_atoms` reuses via `ShallowNetwork`'s
+constructor) and `parameters()` yields θ in the same `[c | C | a | b0]` order the
+old hand-packing used.
