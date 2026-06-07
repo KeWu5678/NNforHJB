@@ -22,6 +22,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from src.PDAP import PDAP
+from src.data import split_value_samples
+from src.models import build_model
 from src.config.activations import ACTIVATIONS
 from src.config.schema import EnvConfig, ExperimentConfig, ModelConfig, TrainingConfig
 from src.experiment_logging import RunRecordWriter
@@ -99,15 +101,17 @@ def main() -> int:
             training=TrainingConfig(num_iterations=args.num_iterations, num_insertion=args.num_insertion),
             env=EnvConfig(verbose=False),
         )
-        pdpa = PDAP(cfg, data)
-        result = pdpa.fit(
+        model = build_model(cfg, data["x"].shape[1])
+        train_data, valid_data = split_value_samples(data, cfg.data.train_fraction)
+        result = PDAP(cfg).fit(
+            model, train_data, valid_data,
             num_iterations=args.num_iterations,
             num_insertion=args.num_insertion,
             verbose=False,
         )
-        bi = result["best_iteration"]
-        h1 = float(result["err_h1_val"][bi])
-        n  = int(result["best_neurons"])
+        bi = result.best_iteration
+        h1 = float(result.err_h1_val[bi])
+        n  = int(result.best_neurons)
         per_gamma.append({
             "gamma": gamma, "h1": h1, "n": n, "score": h1 * n,
             "best_iteration": bi,

@@ -28,6 +28,8 @@ import torch
 
 from src.PDAP import PDAP
 from src.config.schema import EnvConfig, ExperimentConfig, ModelConfig, TrainingConfig
+from src.data import split_value_samples
+from src.models import build_model
 
 GOLDEN_PATH = Path(__file__).parent / "fixtures" / "pdap_golden.npz"
 SEED = 123
@@ -68,14 +70,17 @@ def _run_summary(name: str) -> np.ndarray:
     """Run one variant for a short loop; return [final_neurons, l2, h1, last_loss]."""
     torch.manual_seed(SEED)
     np.random.seed(SEED)
-    pdap = PDAP(_cfg(name), _make_data())
-    out = pdap.fit(num_iterations=3, num_insertion=20, verbose=False)
+    cfg = _cfg(name)
+    data = _make_data()
+    model = build_model(cfg, input_dim=data["x"].shape[1])
+    train, valid = split_value_samples(data, cfg.data.train_fraction)
+    out = PDAP(cfg).fit(model, train, valid, num_iterations=3, num_insertion=20, verbose=False)
     return np.array(
         [
-            float(out["final_neurons"]),
-            float(out["best_err_l2_train"]),
-            float(out["best_err_h1_train"]),
-            float(out["train_loss"][-1]),
+            float(out.final_neurons),
+            float(out.best_err_l2_train),
+            float(out.best_err_h1_train),
+            float(out.train_loss[-1]),
         ],
         dtype=np.float64,
     )

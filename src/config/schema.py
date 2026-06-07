@@ -94,8 +94,9 @@ class DataConfig:
     generators save ``.npz`` files with the same keys.
     ``train_fraction`` is the train/validation split applied in
     ``src.data.split_value_samples`` (first fraction trains, rest validates).
-    ``normalize`` applies max-abs scaling (with chain-rule gradient transform)
-    at load time; see ``PDAP.from_config``.
+    ``normalize`` applies max-abs scaling (with chain-rule gradient transform);
+    data loading / normalization / splitting happen in the run script (see
+    ``scripts/train.py``), not the trainer.
     """
 
     path: str = "VDP_beta_0.1_grid_30x30.npy"

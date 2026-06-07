@@ -47,8 +47,10 @@ if str(REPO_ROOT) not in sys.path:
 from scripts.run_discontinuous_activation_experiment import ACTIVATIONS, set_seed  # noqa: E402
 from src.PDAP import PDAP  # noqa: E402
 from src.config.schema import EnvConfig, ExperimentConfig, ModelConfig, TrainingConfig  # noqa: E402
+from src.data import split_value_samples  # noqa: E402
 from src.experiment_logging import RunRecordWriter  # noqa: E402
 from src.logging_config import configure_logging  # noqa: E402
+from src.models import build_model  # noqa: E402
 from src.models.net import ShallowNetwork  # noqa: E402
 from src.paths import DATA_DIR  # noqa: E402
 
@@ -59,17 +61,17 @@ def relative_norm(error: np.ndarray, reference: np.ndarray) -> float:
     return float(np.linalg.norm(error.reshape(-1)) / max(np.linalg.norm(reference.reshape(-1)), 1e-12))
 
 
-def predict_signed_network(result, x, activation=torch.relu):
-    """Rebuild a pure signed shallow network from a PDAP result and predict."""
-    best_iteration = int(result["best_iteration"])
-    inner = result["inner_weights"][best_iteration]
+def predict_signed_network(result, x, power, activation=torch.relu):
+    """Rebuild a pure signed shallow network from a PDAP History and predict."""
+    best_iteration = int(result.best_iteration)
+    inner = result.inner_weights[best_iteration]
     weights, bias = inner["weight"], inner["bias"]
-    outer = result["outer_weights"][best_iteration]
+    outer = result.outer_weights[best_iteration]
     n_neurons = int(weights.shape[0])
     if n_neurons == 0:
         return np.zeros((x.shape[0], 1), dtype=np.float64), np.zeros_like(x), 0
     net = ShallowNetwork(
-        [x.shape[1], n_neurons, 1], activation=activation, p=float(result["power"]),
+        [x.shape[1], n_neurons, 1], activation=activation, p=float(power),
         inner_weights=weights, inner_bias=bias, outer_weights=outer,
     )
     net.eval()
@@ -275,18 +277,20 @@ def train_semiconcave_profile(train_norm, eval_norm, eval_x_phys, scales, sw_dis
         training=TrainingConfig(lr=args.pdap_lr),
         env=EnvConfig(verbose=False),
     )
-    pdpa = PDAP(cfg, train_norm)
-    result = pdpa.fit(
+    model = build_model(cfg, train_norm["x"].shape[1])
+    train_split, valid_split = split_value_samples(train_norm, cfg.data.train_fraction)
+    result = PDAP(cfg).fit(
+        model, train_split, valid_split,
         num_iterations=args.num_iterations,
         num_insertion=args.num_insertion,
         max_insert=args.max_insert,
         verbose=False,
     )
-    value_pred, grad_pred = pdpa.predict(eval_norm["x"])
+    value_pred, grad_pred = model.predict(eval_norm["x"])
     metrics = pendulum_metrics(eval_norm, eval_x_phys, scales, sw_distance,
                                value_pred, grad_pred, hjb_fn)
-    neurons = int(result["final_neurons"])
-    bi = int(result["best_iteration"])
+    neurons = int(result.final_neurons)
+    bi = int(result.best_iteration)
     return {
         "model": "semiconcave_profile",
         "activation": args.activation_name,
@@ -296,9 +300,9 @@ def train_semiconcave_profile(train_norm, eval_norm, eval_x_phys, scales, sw_dis
         "elapsed_s": round(time.time() - start, 3),
         "neurons": neurons,
         "score": metrics["rel_h1"] * max(neurons, 1),
-        "C": float(result["C"]),
-        "train_h1_final": float(result["err_h1_train"][bi]),
-        "val_h1_final": float(result["err_h1_val"][bi]),
+        "C": float(model.C.detach()),
+        "train_h1_final": float(result.err_h1_train[bi]),
+        "val_h1_final": float(result.err_h1_val[bi]),
         **metrics,
     }
 
@@ -316,19 +320,21 @@ def train_signed_profile(train_norm, eval_norm, eval_x_phys, scales, sw_distance
         training=TrainingConfig(lr=args.pdap_lr),
         env=EnvConfig(verbose=False),
     )
-    pdpa = PDAP(cfg, train_norm)
-    result = pdpa.fit(
+    model = build_model(cfg, train_norm["x"].shape[1])
+    train_split, valid_split = split_value_samples(train_norm, cfg.data.train_fraction)
+    result = PDAP(cfg).fit(
+        model, train_split, valid_split,
         num_iterations=args.num_iterations,
         num_insertion=args.num_insertion,
         max_insert=args.max_insert,
         verbose=False,
     )
     value_pred, grad_pred, neurons = predict_signed_network(
-        result, eval_norm["x"], activation=args.activation_fn
+        result, eval_norm["x"], args.power, activation=args.activation_fn
     )
     metrics = pendulum_metrics(eval_norm, eval_x_phys, scales, sw_distance,
                                value_pred, grad_pred, hjb_fn)
-    best_iteration = int(result["best_iteration"])
+    best_iteration = int(result.best_iteration)
     return {
         "model": "signed_profile",
         "activation": args.activation_name,
@@ -339,8 +345,8 @@ def train_signed_profile(train_norm, eval_norm, eval_x_phys, scales, sw_distance
         "neurons": int(neurons),
         "score": metrics["rel_h1"] * max(int(neurons), 1),
         "C": None,
-        "train_h1_final": float(result["err_h1_train"][best_iteration]),
-        "val_h1_final": float(result["err_h1_val"][best_iteration]),
+        "train_h1_final": float(result.err_h1_train[best_iteration]),
+        "val_h1_final": float(result.err_h1_val[best_iteration]),
         **metrics,
     }
 

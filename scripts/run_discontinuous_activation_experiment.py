@@ -24,10 +24,12 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.run_activation_experiment import ACTIVATIONS as BASE_ACTIVATIONS  # noqa: E402
-from src.PDAP import PDAP  # noqa: E402
+from src.PDAP import PDAP, History  # noqa: E402
 from src.config.schema import EnvConfig, ExperimentConfig, ModelConfig, TrainingConfig  # noqa: E402
+from src.data import split_value_samples  # noqa: E402
 from src.experiment_logging import RunRecordWriter  # noqa: E402
 from src.logging_config import configure_logging  # noqa: E402
+from src.models import build_model  # noqa: E402
 from src.models.net import ShallowNetwork  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -109,16 +111,16 @@ def as_numpy(value: Any) -> np.ndarray:
     return np.asarray(value)
 
 
-def build_network(result: dict[str, Any], iteration: int, activation_fn: Any) -> ShallowNetwork:
-    inner = result["inner_weights"][iteration]
+def build_network(result: History, iteration: int, activation_fn: Any) -> ShallowNetwork:
+    inner = result.inner_weights[iteration]
     weights = as_numpy(inner["weight"])
     bias = as_numpy(inner["bias"])
-    outer = as_numpy(result["outer_weights"][iteration])
+    outer = as_numpy(result.outer_weights[iteration])
     n_neurons = weights.shape[0]
     net = ShallowNetwork(
         [2, n_neurons, 1],
         activation=activation_fn,
-        p=result.get("power", POWER),
+        p=POWER,
         inner_weights=weights,
         inner_bias=bias,
         outer_weights=outer,
@@ -208,18 +210,20 @@ def main() -> int:
             training=TrainingConfig(num_iterations=args.num_iterations, num_insertion=args.num_insertion),
             env=EnvConfig(verbose=False),
         )
-        pdpa = PDAP(cfg, train_data)
-        result = pdpa.fit(
+        model = build_model(cfg, train_data["x"].shape[1])
+        train_split, valid_split = split_value_samples(train_data, cfg.data.train_fraction)
+        result = PDAP(cfg).fit(
+            model, train_split, valid_split,
             num_iterations=args.num_iterations,
             num_insertion=args.num_insertion,
             verbose=False,
         )
-        best_iteration = int(result["best_iteration"])
+        best_iteration = int(result.best_iteration)
         net = build_network(result, best_iteration, activation_fn)
         metrics = evaluate_network(net, eval_data, eval_dist)
-        n_neurons = int(result["inner_weights"][best_iteration]["weight"].shape[0])
-        train_h1 = float(result["err_h1_train"][best_iteration])
-        val_h1 = float(result["err_h1_val"][best_iteration])
+        n_neurons = int(result.inner_weights[best_iteration]["weight"].shape[0])
+        train_h1 = float(result.err_h1_train[best_iteration])
+        val_h1 = float(result.err_h1_val[best_iteration])
         score = metrics["eval_h1"] * n_neurons
         per_gamma.append(
             {
