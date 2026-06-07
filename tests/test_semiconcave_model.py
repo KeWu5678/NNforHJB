@@ -3,8 +3,28 @@
 import numpy as np
 import torch
 
+from torch.nn.utils import parameters_to_vector
+
 from src.SSN import SSN
+from src.PDAP.ssn_solve import ssn_solve, Objective, SolverConfig
+from src.eval import relative_errors
 from src.models.semiconcave import SemiconcaveModel
+
+
+def _theta(m):
+    """The model's trainable parameters as a flat vector (the SSN working var)."""
+    return parameters_to_vector([p for p in m.parameters() if p.requires_grad])
+
+
+def _set_structural(m, C=None, a=None, b0=None):
+    """Set the (now nn.Parameter) structural fields in place."""
+    with torch.no_grad():
+        if C is not None:
+            m.C.fill_(C)
+        if a is not None:
+            m.affine_w.copy_(torch.as_tensor(a, dtype=torch.float64))
+        if b0 is not None:
+            m.affine_b.fill_(b0)
 
 
 def _atoms(n, d, seed=0):
@@ -48,13 +68,11 @@ def test_predict_matches_linear_features():
     d, N, n = 2, 40, 4
     x = torch.randn(N, d, dtype=torch.float64)
     W, b = _atoms(n, d)
-    m = SemiconcaveModel(alpha=1e-3, gamma=1.0, power=1.0, verbose=False)
+    m = SemiconcaveModel(power=1.0, verbose=False)
     m.set_atoms(W, b, torch.tensor([1.0, 0.5, 0.0, 2.0], dtype=torch.float64))
-    m.C = 1.3
-    m.affine_w = torch.tensor([0.2, -0.4], dtype=torch.float64)
-    m.affine_b = 0.7
-    Phi_v, Phi_g, _ = m._build_features(x)
-    theta = m._theta_vector(n)
+    _set_structural(m, C=1.3, a=[0.2, -0.4], b0=0.7)
+    Phi_v, Phi_g = m.jacobians(x)
+    theta = _theta(m)
     Vp, dVp = m.predict_tensors(x)
     assert torch.allclose(Phi_v @ theta, Vp.reshape(-1), atol=1e-10)
     assert torch.allclose(Phi_g @ theta, dVp.reshape(-1), atol=1e-10)
@@ -64,9 +82,9 @@ def test_augmented_hessian_matches_autograd():
     d, N, n = 2, 40, 4
     x = torch.randn(N, d, dtype=torch.float64)
     W, b = _atoms(n, d, seed=3)
-    m = SemiconcaveModel(alpha=1e-3, gamma=1.0, power=1.0, verbose=False)
+    m = SemiconcaveModel(power=1.0, verbose=False)
     m.set_atoms(W, b, torch.zeros(n))
-    Phi_v, Phi_g, _ = m._build_features(x)
+    Phi_v, Phi_g = m.jacobians(x)
     Vt = torch.randn(N, dtype=torch.float64)
     dVt = torch.randn(N * d, dtype=torch.float64)
     Nx = N * d
@@ -77,7 +95,7 @@ def test_augmented_hessian_matches_autograd():
         rg = Phi_g @ th - dVt
         return (1.0 / (2 * Nx)) * (rv @ rv) + (1.0 / (2 * Nx)) * (rg @ rg)
 
-    Hau = torch.autograd.functional.hessian(dloss, m._theta_vector(n))
+    Hau = torch.autograd.functional.hessian(dloss, _theta(m))
     assert torch.allclose(H, Hau, atol=1e-10)
 
 
@@ -85,21 +103,17 @@ def test_train_ssn_recovers_synthetic_semiconcave_target():
     d, N, n = 2, 80, 4
     x = torch.randn(N, d, dtype=torch.float64)
     W, b = _atoms(n, d, seed=7)
-    truth = SemiconcaveModel(alpha=1e-4, gamma=1.0, power=1.0, verbose=False)
+    truth = SemiconcaveModel(power=1.0, verbose=False)
     truth.set_atoms(W, b, torch.tensor([1.5, 0.0, 0.8, 0.0], dtype=torch.float64))
-    truth.C = 2.0
-    truth.affine_w = torch.tensor([0.3, 0.1], dtype=torch.float64)
-    truth.affine_b = -0.5
+    _set_structural(truth, C=2.0, a=[0.3, 0.1], b0=-0.5)
     V, dV = truth.predict_tensors(x)
 
-    fit = SemiconcaveModel(alpha=1e-4, gamma=1.0, power=1.0, verbose=False)
+    fit = SemiconcaveModel(power=1.0, verbose=False)
     fit.set_atoms(W, b, torch.full((n,), 0.1, dtype=torch.float64))
-    fit.C = 0.5
-    fit.affine_w = torch.zeros(d, dtype=torch.float64)
-    fit.affine_b = 0.0
-    fit.train_ssn(x, V, dV, iterations=25)
+    _set_structural(fit, C=0.5, a=[0.0, 0.0], b0=0.0)
+    ssn_solve(fit, (x, V, dV), Objective(alpha=1e-4, gamma=1.0, th=0.5), SolverConfig(), iterations=25)
 
-    _, _, h1 = fit._compute_relative_errors(x, V, dV)
+    _, _, h1 = relative_errors(*fit.predict_tensors(x), V, dV)
     assert h1 < 1e-2
-    assert abs(fit.C - 2.0) < 0.05
+    assert abs(float(fit.C.detach()) - 2.0) < 0.05
     assert bool((fit.c >= -1e-9).all())

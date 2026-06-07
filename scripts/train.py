@@ -36,6 +36,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 import src.config.store  # noqa: F401  — registers `config_schema` with Hydra's ConfigStore
+from src.data import load_value_samples, normalize_value_samples, split_value_samples
+from src.models import build_model
 from src.PDAP import PDAP
 from src.experiment_logging import ExperimentRun
 from src.logging_config import configure_logging
@@ -64,22 +66,37 @@ def main(cfg: DictConfig) -> None:
         config=OmegaConf.to_container(cfg, resolve=True),
     )
 
-    pdap = PDAP.from_config(cfg)
-    logger.info("loaded %s  (d=%d)", cfg.data.path, pdap.input_dim)
-    result = pdap.fit_from_config(cfg.training, verbose=cfg.env.verbose)
+    # Data preprocessing lives in the script: load, normalize, split.  The model
+    # is built by build_model; the trainer holds only config and returns a History.
+    data = load_value_samples(cfg.data.path)
+    if cfg.data.normalize:
+        data, _ = normalize_value_samples(data)
+    input_dim = data["x"].shape[1]
+    logger.info("loaded %s  (d=%d)", cfg.data.path, input_dim)
+    train_data, valid_data = split_value_samples(data, cfg.data.train_fraction)
+    model = build_model(cfg, input_dim)
+
+    history = PDAP(cfg).fit(
+        model, train_data, valid_data,
+        num_iterations=cfg.training.num_iterations,
+        num_insertion=cfg.training.num_insertion,
+        max_insert=cfg.training.max_insert,
+        amp_tol=cfg.training.prune_amp_tol,
+        verbose=cfg.env.verbose,
+    )
 
     # Report the relative errors + sparsity metrics at the selected best iteration.
-    bi = int(result["best_iteration"])
+    bi = int(history.best_iteration)
     metrics = {
-        "rel_l2_train": float(result["err_l2_train"][bi]),
-        "rel_l2_val": float(result["err_l2_val"][bi]),
-        "rel_grad_train": float(result["err_grad_train"][bi]),
-        "rel_grad_val": float(result["err_grad_val"][bi]),
-        "rel_h1_train": float(result["err_h1_train"][bi]),
-        "rel_h1_val": float(result["err_h1_val"][bi]),
+        "rel_l2_train": float(history.err_l2_train[bi]),
+        "rel_l2_val": float(history.err_l2_val[bi]),
+        "rel_grad_train": float(history.err_grad_train[bi]),
+        "rel_grad_val": float(history.err_grad_val[bi]),
+        "rel_h1_train": float(history.err_h1_train[bi]),
+        "rel_h1_val": float(history.err_h1_val[bi]),
         "best_iteration": bi,
-        "best_neurons": int(result["best_neurons"]),
-        "final_neurons": int(result["final_neurons"]),
+        "best_neurons": int(history.best_neurons),
+        "final_neurons": int(history.final_neurons),
     }
     logger.info(
         "best iter %d | neurons %d | rel-L2 %.3e | rel-semiH1 %.3e | rel-H1 %.3e (val)",

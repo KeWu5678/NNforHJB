@@ -46,10 +46,16 @@ class ModelConfig:
     # activations (relu, abs, ...); set by hand to match the chosen activation.
     use_sphere: bool = True
     c_init: float = 1.0           # semiconcave only
-    # regularization hyperparameters
+    # Regularization.  The penalty on the atom weights is  alpha * sum_i phi(|c_i|^q),
+    # with q = 2/(power+1) (power is the activation exponent set above).  The two
+    # penalties this project uses are selected by how you set power and gamma:
+    #   * power penalty   alpha * sum |c|^q   -- set gamma = 0 (phi becomes the
+    #     identity) and power > 1 (so q < 1 is genuinely non-convex).
+    #   * log penalty     alpha * sum phi(|c|) -- set power = 1 (so q = 1) and
+    #     gamma > 0; th interpolates L1 (th=1) <-> non-convex log (th=0).
     alpha: float = 1e-5
-    gamma: float = 0.0
-    th: float = 0.5
+    gamma: float = 0.0   # 0 => log term off (power penalty); > 0 => log penalty
+    th: float = 0.5      # L1 (th=1) <-> non-convex log (th=0); only acts when gamma > 0
 
 
 @dataclass
@@ -86,12 +92,15 @@ class DataConfig:
     paths are allowed. Resolution happens in ``src.data.load_value_samples``.
     The default points at the existing legacy VDP ``.npy``; new OpenLoop
     generators save ``.npz`` files with the same keys.
-    PDAP splits train/validation internally, so no split knob is needed here.
-    ``normalize`` applies max-abs scaling (with chain-rule gradient transform)
-    at load time; see ``PDAP.from_config``.
+    ``train_fraction`` is the train/validation split applied in
+    ``src.data.split_value_samples`` (first fraction trains, rest validates).
+    ``normalize`` applies max-abs scaling (with chain-rule gradient transform);
+    data loading / normalization / splitting happen in the run script (see
+    ``scripts/train.py``), not the trainer.
     """
 
     path: str = "VDP_beta_0.1_grid_30x30.npy"
+    train_fraction: float = 0.9
     normalize: bool = True
 
 

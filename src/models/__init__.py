@@ -8,5 +8,6 @@ Each model represents V(x):
 from .net import ShallowNetwork
 from .signed import SignedModel
 from .semiconcave import SemiconcaveModel
+from .build import build_model
 
-__all__ = ["ShallowNetwork", "SignedModel", "SemiconcaveModel"]
+__all__ = ["ShallowNetwork", "SignedModel", "SemiconcaveModel", "build_model"]

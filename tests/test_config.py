@@ -1,23 +1,15 @@
-"""Tests for the Hydra config system: composition, model groups, config→PDAP."""
+"""Tests for the Hydra config system: composition, model groups, config→trainer."""
 
 from __future__ import annotations
 
-import numpy as np
 import torch
 from hydra import compose, initialize
 
 import src.config.store  # noqa: F401  — registers `config_schema`
 from src.config import get_activation
+from src.data import load_value_samples
+from src.models import build_model
 from src.PDAP import PDAP
-
-
-def _data() -> dict:
-    rng = np.random.default_rng(0)
-    return {
-        "x": rng.standard_normal((20, 2)),
-        "v": rng.standard_normal((20, 1)),
-        "dv": rng.standard_normal((20, 2)),
-    }
 
 
 def test_compose_defaults() -> None:
@@ -48,32 +40,34 @@ def test_model_groups() -> None:
     assert fs.model.insertion == "finite_step"
 
 
-def test_config_builds_pdap() -> None:
-    """PDAP reads its identity + hyperparameters straight off the composed config."""
-    data = _data()
+def test_config_builds_trainer_and_model() -> None:
+    """The trainer reads its config; the model is built separately by build_model."""
     with initialize(version_base=None, config_path="../conf"):
         cfg = compose(config_name="config", overrides=["model.gamma=0.5", "env.verbose=false"])
 
-    pdap = PDAP(cfg, data)
-
-    assert pdap.alpha == cfg.model.alpha == 1e-5
+    pdap = PDAP(cfg)
+    # objective + solver + insertion settings live on the trainer (config only)
+    assert pdap.objective.alpha == cfg.model.alpha == 1e-5
+    assert pdap.objective.gamma == 0.5
     assert pdap.insertion_kind == "profile"
-    assert type(pdap.model).__name__ == "SignedModel"
-    assert pdap.model.gamma == 0.5
-    assert pdap.model.power == cfg.model.power
-    assert pdap.activation_fn is torch.relu
-    # surfaced solver/insertion constants come from the training section
-    assert pdap.model.max_ls_iter == 500
+    assert pdap.solver.max_ls_iter == 500
     assert pdap.fit_outer_iterations == 20
     assert pdap.ins_merge_tol == 1e-2
 
+    model = build_model(cfg, input_dim=2)
+    assert type(model).__name__ == "SignedModel"
+    assert model.power == cfg.model.power
+    assert model.activation is torch.relu
+    assert model.input_dim == 2
 
-def test_from_config_loads_data() -> None:
-    """from_config loads (and normalizes) the dataset named in cfg.data."""
+
+def test_build_model_from_loaded_dataset() -> None:
+    """Loading the configured dataset and building the model gives input_dim=2."""
     with initialize(version_base=None, config_path="../conf"):
         cfg = compose(config_name="config", overrides=["env.verbose=false"])
-    pdap = PDAP.from_config(cfg)
-    assert pdap.input_dim == 2
+    data = load_value_samples(cfg.data.path)
+    model = build_model(cfg, input_dim=data["x"].shape[1])
+    assert model.input_dim == 2
 
 
 def test_activation_resolver() -> None:
@@ -82,9 +76,8 @@ def test_activation_resolver() -> None:
 
 
 def test_use_sphere_is_explicit() -> None:
-    data = _data()
     with initialize(version_base=None, config_path="../conf"):
         default = compose(config_name="config", overrides=["env.verbose=false"])
         override = compose(config_name="config", overrides=["model.use_sphere=false", "env.verbose=false"])
-    assert PDAP(default, data)._use_sphere is True
-    assert PDAP(override, data)._use_sphere is False
+    assert PDAP(default)._use_sphere is True
+    assert PDAP(override)._use_sphere is False
