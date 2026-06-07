@@ -30,6 +30,24 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def nonconvex_penalty(
+    theta: torch.Tensor, penalized: torch.Tensor, nonneg: torch.Tensor,
+    *, alpha: float, th: float, gamma: float, q: float,
+) -> torch.Tensor:
+    """The regularizer alpha * sum_i phi(arg_i) over the penalized coordinates.
+
+    arg = base^q with base = |theta| on free-sign coords and clamp(theta, 0) on
+    nonnegative ones.  This is the trainer's objective term -- shared by the SSN
+    closure and the loss recording so they cannot drift apart.
+    """
+    pen = theta[penalized]
+    if pen.numel() == 0:
+        return theta.new_zeros(())
+    base = torch.where(nonneg[penalized], pen.clamp_min(0.0), pen.abs())
+    arg = base if q == 1.0 else base.clamp_min(1e-30) ** q
+    return alpha * torch.sum(_phi(arg, th, gamma))
+
+
 def ssn_solve(model: "PDAPModel", data_train, *, iterations: int, verbose: bool = False) -> Dict:
     """Solve for the model's outer weights in place; return a fit summary."""
     X, V, dV = data_train
@@ -66,13 +84,7 @@ def ssn_solve(model: "PDAPModel", data_train, *, iterations: int, verbose: bool 
         rv = Phi_v @ theta - Vt
         rg = Phi_g @ theta - dVt
         data = (w1 / (2 * Nx)) * (rv @ rv) + (w2 / (2 * Nx)) * (rg @ rg)
-        pen = theta[penalized]
-        if pen.numel():
-            base = torch.where(nonneg[penalized], pen.clamp_min(0.0), pen.abs())
-            arg = base if q == 1.0 else base.clamp_min(1e-30) ** q
-            penalty = alpha * torch.sum(_phi(arg, th, gamma))
-        else:
-            penalty = theta.new_zeros(())
+        penalty = nonconvex_penalty(theta, penalized, nonneg, alpha=alpha, th=th, gamma=gamma, q=q)
         return data + penalty
 
     made_progress = False

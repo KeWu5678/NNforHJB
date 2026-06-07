@@ -24,10 +24,12 @@ import torch
 
 from ..models.signed import SignedModel
 from ..models.semiconcave import SemiconcaveModel
-from ..eval import relative_errors
+from torch.nn.utils import parameters_to_vector
+
+from ..eval import relative_errors, data_loss_terms
 from .insertion import profile_threshold, finite_step
 from .warmstart import warm_start
-from .ssn_solve import ssn_solve
+from .ssn_solve import ssn_solve, nonconvex_penalty
 
 logger = logging.getLogger(__name__)
 
@@ -201,6 +203,24 @@ class PDAP:
         except RuntimeError:
             return -V.detach(), -dV.detach()
 
+    def _record_loss(self, data) -> float:
+        """The training objective (data fidelity + penalty) at the current model.
+
+        The trainer owns the objective: the data term comes from the model's
+        prediction via :func:`src.eval.data_loss_terms`, the penalty from the
+        model's penalized parameters (same term the SSN closure uses).
+        """
+        X, V, dV = data
+        Vp, dVp = self.model.predict_tensors(X)
+        data_loss = data_loss_terms(Vp, dVp, V, dV, self.model.loss_weights)[0]
+        theta = parameters_to_vector([p for p in self.model.parameters() if p.requires_grad]).detach()
+        penalized, nonneg = self.model.penalty_masks()
+        penalty = nonconvex_penalty(
+            theta, penalized, nonneg,
+            alpha=self.model.alpha, th=self.model.th, gamma=self.model.gamma, q=self.model.q,
+        )
+        return float((data_loss + penalty).detach())
+
     def _warm_start(self, W: torch.Tensor, b: torch.Tensor, verbose: bool) -> torch.Tensor:
         """Coordinate-descent initial outer weights for new atoms (W, b)."""
         return warm_start(
@@ -293,8 +313,8 @@ class PDAP:
             self.model.set_atoms(W, b, c)
 
             # 3. record losses / errors / weights
-            tl = float(self.model.compute_loss(*self.data_train)[0].detach())
-            vl = float(self.model.compute_loss(*self.data_valid)[0].detach())
+            tl = self._record_loss(self.data_train)
+            vl = self._record_loss(self.data_valid)
             self.train_loss.append(tl)
             self.val_loss.append(vl)
             l2t, gt, h1t = relative_errors(*self.model.predict_tensors(self.data_train[0]), *self.data_train[1:])

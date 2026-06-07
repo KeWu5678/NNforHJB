@@ -15,8 +15,6 @@ import logging
 
 import torch
 
-from ..SSN.penalty import _phi
-from ..eval import data_loss_terms
 from .net import ShallowNetwork
 
 logger = logging.getLogger(__name__)
@@ -125,24 +123,6 @@ class SignedModel(ShallowNetwork):
         xt = torch.as_tensor(x, dtype=torch.float64)
         V, dV = self.predict_tensors(xt)
         return V.cpu().numpy(), dV.cpu().numpy()
-
-    def compute_loss(
-        self, x_input: torch.Tensor, target_v: torch.Tensor, target_dv: torch.Tensor
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Full objective (data fidelity + nonconvex penalty) for loss recording."""
-        x = x_input.clone().detach().requires_grad_(True)
-        pred_v = self(x)
-        pred_dv = torch.autograd.grad(
-            outputs=pred_v, inputs=x, grad_outputs=torch.ones_like(pred_v),
-            create_graph=True, retain_graph=True,
-        )[0]
-        data_loss, value_loss, grad_loss = data_loss_terms(
-            pred_v, pred_dv, target_v, target_dv, self.loss_weights
-        )
-        abs_u = torch.abs(self.output.weight)
-        reg_arg = abs_u ** self.q if self.q != 1.0 else abs_u
-        total_loss = data_loss + self.alpha * torch.sum(_phi(reg_arg, self.th, self.gamma))
-        return total_loss, value_loss, grad_loss
 
     # ------------------------------------------------------------------ #
     # Linear-in-theta interface for the trainer SSN solve.  theta is the output

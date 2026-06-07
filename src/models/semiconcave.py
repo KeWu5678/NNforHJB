@@ -24,9 +24,6 @@ import numpy as np
 import torch
 from torch.nn.utils import parameters_to_vector
 
-from ..SSN.penalty import _phi
-from ..eval import data_loss_terms
-
 logger = logging.getLogger(__name__)
 
 
@@ -153,18 +150,6 @@ class SemiconcaveModel(torch.nn.Module):
         xt = torch.as_tensor(x, dtype=self.dtype)
         V, dV = self.predict_tensors(xt)
         return V.cpu().numpy(), dV.cpu().numpy()
-
-    def _penalty(self) -> torch.Tensor:
-        if self.n_neurons == 0:
-            return torch.zeros((), dtype=self.dtype)
-        c = self.c.clamp_min(0.0)
-        arg = c if self.q == 1.0 else c.clamp_min(1e-30) ** self.q
-        return self.alpha * torch.sum(_phi(arg, self.th, self.gamma))
-
-    def compute_loss(self, x, V, dV):
-        Vp, dVp = self.predict_tensors(x)
-        data, value_loss, grad_loss = data_loss_terms(Vp, dVp, V, dV, self.loss_weights)
-        return data + self._penalty(), value_loss, grad_loss
 
     # ------------------------------------------------------------------ #
     # Linear-in-theta interface for the trainer SSN solve (src.PDAP.ssn_solve).
