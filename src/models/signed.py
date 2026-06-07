@@ -3,7 +3,7 @@
 """Signed shallow-network model: V(x) = sum_i c_i sigma(w_i . x + b_i)^p.
 
 ``SignedModel`` *is* the shallow network -- it subclasses :class:`ShallowNetwork`
-(an ``nn.Module``) rather than wrapping one, so prediction is the built-in
+(an ``nn.Module``). Prediction is the built-in.
 ``forward`` and the weights are ordinary module parameters. It adds only the
 PDAP model contract (:class:`src.models.base.PDAPModel`): atom support,
 prediction, the linear-in-theta feature maps, and the loss objective. The SSN

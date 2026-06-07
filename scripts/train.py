@@ -67,7 +67,7 @@ def main(cfg: DictConfig) -> None:
     )
 
     # Data preprocessing lives in the script: load, normalize, split.  The model
-    # is built by the factory; the trainer holds only config and returns a History.
+    # is built by build_model; the trainer holds only config and returns a History.
     data = load_value_samples(cfg.data.path)
     if cfg.data.normalize:
         data, _ = normalize_value_samples(data)

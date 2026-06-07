@@ -41,7 +41,7 @@ def test_model_groups() -> None:
 
 
 def test_config_builds_trainer_and_model() -> None:
-    """The trainer reads its config; the model is built separately by the factory."""
+    """The trainer reads its config; the model is built separately by build_model."""
     with initialize(version_base=None, config_path="../conf"):
         cfg = compose(config_name="config", overrides=["model.gamma=0.5", "env.verbose=false"])
 
