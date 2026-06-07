@@ -116,3 +116,21 @@ flattened away). Bit-exactness held because building `nn.Parameter`s consumes no
 RNG (unlike `nn.Linear`, whose draw `set_atoms` reuses via `ShallowNetwork`'s
 constructor) and `parameters()` yields θ in the same `[c | C | a | b0]` order the
 old hand-packing used.
+
+## Penalty selection stays config-driven
+
+The penalty is `alpha * Σ phi(|c|^q)` with two independent knobs — the power-q
+exponent (`q = 2/(power+1)`) and the log-nonconvex `phi` (`gamma`, `th`). We
+considered a named `penalty: l1 | power_q | log | composed` selector (which would
+have decoupled the penalty exponent from the activation power so `log`/`l1` force
+`q = 1`), but rejected it: it adds an enum plus validation and a second notion of
+`q` for a choice the existing parameters already express. Instead the two
+penalties this project uses are selected by parameter values, documented inline in
+`ModelConfig`:
+
+- **power penalty** `alpha * Σ |c|^q` — `gamma = 0` (phi is the identity),
+  `power > 1` (so `q < 1` is non-convex).
+- **log penalty** `alpha * Σ phi(|c|)` — `power = 1` (so `q = 1`), `gamma > 0`.
+
+So the penalty is configurable but not a named axis; `power` and `gamma` remain
+its controls, and the penalty exponent stays coupled to the activation power.
