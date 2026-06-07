@@ -40,7 +40,6 @@ class SignedModel(ShallowNetwork):
         self.q = 2.0 / (power + 1.0)
         self.verbose = verbose
         self.input_dim: Optional[int] = None
-        self.last_fit_summary: dict = {}
 
     # ------------------------------------------------------------------ #
     # Atom support: (re)build the shallow net on the current support.
@@ -87,9 +86,13 @@ class SignedModel(ShallowNetwork):
     # Prediction (forward is inherited from ShallowNetwork).
     # ------------------------------------------------------------------ #
     def predict_tensors(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Return (V (N,1), dV (N,d)) as detached tensors."""
+        """Return (V (N,1), dV (N,d)) as detached tensors.
+
+        With no support yet this is the empty (zero) network: V = 0, dV = 0 -- so
+        the trainer can read a residual before the first atoms are inserted.
+        """
         if "hidden" not in self._modules:
-            raise RuntimeError("no support yet; call set_atoms() first")
+            return x.new_zeros(x.shape[0], 1), x.new_zeros(x.shape)
         x_req = x.detach().clone().requires_grad_(True)
         with torch.enable_grad():
             V = self(x_req)

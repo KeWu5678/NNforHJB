@@ -5,14 +5,13 @@ One ``PDAP`` class is configured by two explicit axes:
   * ``model``     — ``"signed"`` (pure network) or ``"semiconcave"`` (V = 0.5 C||x||^2 - g).
   * ``insertion`` — ``"profile"`` (dual-threshold) or ``"finite_step"`` (Delta J < 0).
 
-The loop is model-agnostic: it drives the model through the uniform interface
-(``set_atoms`` / ``get_atoms`` / ``fit_outer_weights`` / ``predict_tensors``),
-the insertion strategy through :mod:`insertion`, and the warm start through
-:mod:`warmstart` (a trainer step, not model state).
+The loop is model-agnostic: it drives the model through its contract
+(:class:`src.models.base.PDAPModel`) and runs the SSN outer solve, warm start,
+and insertion as trainer steps (:mod:`ssn_solve`, :mod:`warmstart`,
+:mod:`insertion`).
 
   init:  insert -> warm-start -> set_atoms
-  loop:  fit_outer_weights -> get_atoms -> prune -> set_atoms -> record
-         -> insert -> warm-start -> append -> set_atoms
+  loop:  ssn_solve -> prune -> record -> insert -> warm-start -> set_atoms
 """
 
 from __future__ import annotations
@@ -22,11 +21,13 @@ from typing import Dict, List, Tuple
 
 import torch
 
-from ..models.signed import SignedModel
-from ..models.semiconcave import SemiconcaveModel
 from torch.nn.utils import parameters_to_vector
 
+from ..config.activations import get_activation
+from ..data import load_value_samples, normalize_value_samples, split_value_samples
 from ..eval import relative_errors, data_loss_terms
+from ..models.signed import SignedModel
+from ..models.semiconcave import SemiconcaveModel
 from .insertion import profile_threshold, finite_step
 from .warmstart import warm_start
 from .ssn_solve import ssn_solve, nonconvex_penalty, Objective, SolverConfig
@@ -42,36 +43,33 @@ class PDAP:
         live in ``src.config.schema``, not here. ``data`` is an in-memory
         ``{x, v, dv}`` dict — use :meth:`from_config` to load it from ``cfg.data``.
         """
-        from ..config.activations import get_activation
-
         m, t = cfg.model, cfg.training
         if m.kind not in ("signed", "semiconcave"):
             raise ValueError(f"model.kind must be 'signed' or 'semiconcave', got {m.kind!r}")
         if m.insertion not in ("profile", "finite_step"):
             raise ValueError(f"model.insertion must be 'profile' or 'finite_step', got {m.insertion!r}")
 
+        # cfg values are already typed (Hydra/omegaconf, or the dataclass schema).
         self.insertion_kind = m.insertion
         self.activation_fn = get_activation(m.activation)
-        self._use_sphere = bool(m.use_sphere)
-        self.verbose = bool(cfg.env.verbose)
+        self._use_sphere = m.use_sphere
+        self.verbose = cfg.env.verbose
         # The objective (what is minimized) and the SSN solver settings are the
         # trainer's, not the model's.
         self.objective = Objective(
-            alpha=float(m.alpha), gamma=float(m.gamma), th=float(m.th),
-            loss_weights=tuple(m.loss_weights),
+            alpha=m.alpha, gamma=m.gamma, th=m.th, loss_weights=tuple(m.loss_weights),
         )
         self.solver = SolverConfig(
-            lr=float(t.lr), method=t.method, max_ls_iter=int(t.max_ls_iter),
-            tolerance_ls=float(t.tolerance_ls), tolerance_grad=float(t.tolerance_grad),
-            sigmamax=float(t.sigmamax),
+            lr=t.lr, method=t.method, max_ls_iter=t.max_ls_iter,
+            tolerance_ls=t.tolerance_ls, tolerance_grad=t.tolerance_grad, sigmamax=t.sigmamax,
         )
         # outer-loop + insertion settings (threaded into fit / _insert)
-        self.fit_outer_iterations = int(t.fit_outer_iterations)
-        self.ins_merge_tol = float(t.ins_merge_tol)
-        self.lbfgs_lr = float(t.lbfgs_lr)
-        self.lbfgs_steps = int(t.lbfgs_steps)
-        self.newton_tol = float(t.newton_tol)
-        self.newton_max_iter = int(t.newton_max_iter)
+        self.fit_outer_iterations = t.fit_outer_iterations
+        self.ins_merge_tol = t.ins_merge_tol
+        self.lbfgs_lr = t.lbfgs_lr
+        self.lbfgs_steps = t.lbfgs_steps
+        self.newton_tol = t.newton_tol
+        self.newton_max_iter = t.newton_max_iter
 
         # histories
         self.train_loss: List[float] = []
@@ -84,8 +82,6 @@ class PDAP:
         self.err_h1_val: List[float] = []
         self.inner_weights: List[Dict[str, torch.Tensor]] = []
         self.outer_weights: List[torch.Tensor] = []
-
-        from ..data import split_value_samples
 
         # Input dimension is a property of the data, not the model: read it here
         # and inject it, rather than having the model discover it during prep.
@@ -131,8 +127,6 @@ class PDAP:
         Loads ``cfg.data.path`` (resolved under ``DATA_DIR``) and applies max-abs
         normalization when ``cfg.data.normalize`` is set, then builds the model.
         """
-        from ..data import load_value_samples, normalize_value_samples
-
         data = load_value_samples(cfg.data.path)
         if cfg.data.normalize:
             data, _ = normalize_value_samples(data)
@@ -189,16 +183,12 @@ class PDAP:
     def _residual(self, data) -> Tuple[torch.Tensor, torch.Tensor]:
         """Return ``(prediction - target)`` for value and gradient.
 
-        The semiconcave model predicts its envelope even with no atoms; the signed
-        network has no prediction until its net is built, in which case the
-        residual is ``-target`` (the zero network).
+        Both models predict with no atoms — the semiconcave envelope, or the
+        signed zero network (V = 0) — so the first insertion sees ``-target``.
         """
         X, V, dV = data
-        try:
-            Vp, dVp = self.model.predict_tensors(X)
-            return (Vp - V).detach(), (dVp - dV).detach()
-        except RuntimeError:
-            return -V.detach(), -dV.detach()
+        Vp, dVp = self.model.predict_tensors(X)
+        return (Vp - V).detach(), (dVp - dV).detach()
 
     def _record_loss(self, data) -> float:
         """The training objective (data fidelity + penalty) at the current model.
@@ -308,7 +298,7 @@ class PDAP:
             supp_before = self.model.n_neurons
 
             # 1. SSN on outer weights (inner weights frozen)
-            fit_summary = ssn_solve(
+            ssn_solve(
                 self.model, self.data_train, self.objective, self.solver,
                 iterations=self.fit_outer_iterations, verbose=verbose,
             )
@@ -340,10 +330,6 @@ class PDAP:
                         "Support changed during pruning at iteration %d: %d -> %d neurons",
                         i + 1, supp_before, self.model.n_neurons,
                     )
-                logger.debug(
-                    "Output-weight solver at iteration %d selected inner step %s",
-                    i + 1, fit_summary.get("best_step", "n/a"),
-                )
                 logger.info(
                     "  | %-7s | %7d | %6d | %12.3e | %12.3e | %10.3e | %10.3e |",
                     f"{i + 1}/{num_iterations}", self.model.n_neurons,

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Dict, Tuple
+from typing import TYPE_CHECKING, Tuple
 
 import torch
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
@@ -79,8 +79,8 @@ def nonconvex_penalty(
 def ssn_solve(
     model: "PDAPModel", data_train, objective: Objective, solver: SolverConfig,
     *, iterations: int, verbose: bool = False,
-) -> Dict:
-    """Solve for the model's outer weights in place; return a fit summary."""
+) -> float:
+    """Solve for the model's outer weights in place; return the final train loss."""
     X, V, dV = data_train
     Phi_v, Phi_g = model.jacobians(X)
     Phi_v = Phi_v.detach()
@@ -118,21 +118,11 @@ def ssn_solve(
         penalty = nonconvex_penalty(theta, penalized, nonneg, alpha=alpha, th=th, gamma=gamma, q=q)
         return data + penalty
 
-    made_progress = False
     prev = float(closure().detach())
     for _ in range(iterations):
-        loss = float(optimizer.step(closure).detach())
-        if loss < prev - 1e-15:
-            made_progress = True
-        prev = loss
+        prev = float(optimizer.step(closure).detach())
 
     vector_to_parameters(theta.detach(), params)
-    summary = {
-        "best_step": iterations - 1,
-        "best_train_loss": prev,
-        "successful_steps": iterations if made_progress else 0,
-    }
-    model.last_fit_summary = summary
     if verbose:
         logger.debug("Output-weight solve complete  train_loss=%.6e", prev)
-    return summary
+    return prev

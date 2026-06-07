@@ -66,7 +66,6 @@ class SemiconcaveModel(torch.nn.Module):
         self.register_buffer("b", torch.zeros(0, dtype=dtype))
 
         self.input_dim: int | None = None
-        self.last_fit_summary: dict = {}
 
     # ------------------------------------------------------------------ #
     # State management

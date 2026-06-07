@@ -14,7 +14,7 @@ tests assert conformance with ``isinstance``.
 
 from __future__ import annotations
 
-from typing import Dict, Iterator, Optional, Protocol, Tuple, runtime_checkable
+from typing import Iterator, Optional, Protocol, Tuple, runtime_checkable
 
 import numpy as np
 import torch
@@ -29,7 +29,6 @@ class PDAPModel(Protocol):
     power: float
     q: float
     input_dim: Optional[int]
-    last_fit_summary: Dict
 
     # --- the model is an nn.Module: theta is its trainable parameters ---
     def parameters(self, recurse: bool = True) -> Iterator[torch.nn.Parameter]: ...
