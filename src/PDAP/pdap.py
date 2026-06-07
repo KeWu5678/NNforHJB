@@ -162,7 +162,7 @@ class PDAP:
     def prune_small_weights(
         weights: torch.Tensor, biases: torch.Tensor, outer_weights: torch.Tensor,
         amp_tol: float = 1e-8,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, int, int]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, int]:
         """Defensive gate: drop atoms whose outer weight is negligible.
 
         An atom with ``|c| <= amp_tol`` is effectively the zero measure (the
@@ -170,9 +170,8 @@ class PDAP:
         No clustering/merging is performed; redundant near-duplicate atoms are
         harmless and handled by the next solver iteration.
 
-        Returns ``(weights, biases, outer_weights, merged_count, pruned)``;
-        ``merged_count`` is always 0 (kept so the PDAP progress-table columns are
-        unchanged) and ``pruned`` is the number of atoms dropped.
+        Returns ``(W (n,d), b (n,), c (n,), pruned)`` with ``pruned`` the number
+        of atoms dropped.
         """
         w = weights.detach()
         b = biases.detach().reshape(-1)
@@ -182,14 +181,11 @@ class PDAP:
         keep = ow.abs() > amp_tol
         w_out, b_out, ow_out = w[keep], b[keep], ow[keep]
         pruned = n - int(keep.sum().item())
-        return w_out, b_out, ow_out.reshape(1, -1), 0, pruned
+        return w_out, b_out, ow_out, pruned
 
     # ------------------------------------------------------------------ #
-    # Insertion dispatch (residuals + existing support read from the model)
+    # Per-step helpers: residual, recorded objective, warm-start.
     # ------------------------------------------------------------------ #
-    # The insertion-candidate merge tolerance (self.ins_merge_tol, default 1e-2)
-    # is independent of the prune amplitude gate (fit's amp_tol, used only in
-    # prune_small_weights to drop negligible atoms).
     def _residual(self, data) -> Tuple[torch.Tensor, torch.Tensor]:
         """Return ``(prediction - target)`` for value and gradient.
 
@@ -234,6 +230,23 @@ class PDAP:
             use_sphere=self._use_sphere, nonneg=not self.two_sided, verbose=verbose,
         )
 
+    def _initial_outer_weights(self, W, b, c, verbose: bool) -> torch.Tensor:
+        """Outer weights for freshly inserted atoms.
+
+        The profile strategy returns ``c is None`` and needs a coordinate-descent
+        warm start (its residual is read from the current model — for the signed
+        net that means ``-target`` when no net exists yet, keeping the RNG
+        sequence aligned); the finite-step strategy already supplies ``c``.
+        """
+        if c is None:
+            return self._warm_start(W, b, verbose)
+        return torch.as_tensor(c, dtype=torch.float64).reshape(-1)
+
+    # ------------------------------------------------------------------ #
+    # Insertion dispatch.  The insertion-candidate merge tolerance
+    # (self.ins_merge_tol, default 1e-2) is independent of the prune amplitude
+    # gate (fit's amp_tol, used only in prune_small_weights).
+    # ------------------------------------------------------------------ #
     def _insert(self, num_insertion: int, max_insert: int, verbose: bool):
         """Return (W, b, c) where c is None for the profile strategy (needs warm-start)."""
         X = self.data_train[0]
@@ -272,7 +285,6 @@ class PDAP:
         verbose: bool = True,
     ) -> dict:
         best_iteration_train = 0
-        best_val_loss = float("inf")
         best_train_loss = float("inf")
 
         # --- initialization: insert + warm-start ---
@@ -281,22 +293,16 @@ class PDAP:
         b = torch.as_tensor(b_np, dtype=torch.float64)
         if W.shape[0] == 0:
             raise RuntimeError("PDAP: initial insertion accepted no atoms")
-        if c is None:  # profile strategy: nonneg/signed coordinate-descent warm-start.
-            # The residual is read from the current model (signed: zero network ->
-            # -target; semiconcave: the envelope, valid with no atoms), so no eager
-            # net build is needed here -- keeping the signed RNG sequence aligned.
-            c = self._warm_start(W, b, verbose)
-        else:
-            c = torch.as_tensor(c, dtype=torch.float64).reshape(-1)
+        c = self._initial_outer_weights(W, b, c, verbose)
         self.model.set_atoms(W, b, c)
         if verbose:
             max_weight = float(c.abs().max().item()) if c.numel() else 0.0
             logger.debug("Initial support  neurons=%d  max |output|=%.2e", int(W.shape[0]), max_weight)
             logger.info("Progress")
-            logger.info("  +---------+---------+--------+--------+--------------+--------------+------------+------------+")
-            logger.info("  | %-7s | %7s | %6s | %6s | %12s | %12s | %10s | %10s |",
-                        "iter", "neurons", "merged", "pruned", "train loss", "val loss", "val L2", "val H1")
-            logger.info("  +---------+---------+--------+--------+--------------+--------------+------------+------------+")
+            logger.info("  +---------+---------+--------+--------------+--------------+------------+------------+")
+            logger.info("  | %-7s | %7s | %6s | %12s | %12s | %10s | %10s |",
+                        "iter", "neurons", "pruned", "train loss", "val loss", "val L2", "val H1")
+            logger.info("  +---------+---------+--------+--------------+--------------+------------+------------+")
 
         for i in range(num_iterations):
             supp_before = self.model.n_neurons
@@ -309,10 +315,7 @@ class PDAP:
 
             # 2. prune: defensive gate — drop negligible atoms
             W, b, c = self.model.get_atoms()
-            W, b, c_row, merged_count, pruned_zero = self.prune_small_weights(
-                W, b, c.reshape(1, -1), amp_tol=amp_tol,
-            )
-            c = c_row.reshape(-1)
+            W, b, c, pruned = self.prune_small_weights(W, b, c, amp_tol=amp_tol)
             self.model.set_atoms(W, b, c)
 
             # 3. record losses / errors / weights
@@ -327,8 +330,6 @@ class PDAP:
             self.err_h1_train.append(h1t); self.err_h1_val.append(h1v)
             self.inner_weights.append({"weight": W.clone(), "bias": b.clone()})
             self.outer_weights.append(c.reshape(1, -1).clone())
-            if vl < best_val_loss:
-                best_val_loss = vl
             if tl < best_train_loss:
                 best_train_loss = tl
                 best_iteration_train = i
@@ -344,9 +345,9 @@ class PDAP:
                     i + 1, fit_summary.get("best_step", "n/a"),
                 )
                 logger.info(
-                    "  | %-7s | %7d | %6d | %6d | %12.3e | %12.3e | %10.3e | %10.3e |",
+                    "  | %-7s | %7d | %6d | %12.3e | %12.3e | %10.3e | %10.3e |",
                     f"{i + 1}/{num_iterations}", self.model.n_neurons,
-                    merged_count, pruned_zero, tl, vl, l2v, h1v,
+                    pruned, tl, vl, l2v, h1v,
                 )
 
             # 4. insert new neurons + warm-start
@@ -354,10 +355,7 @@ class PDAP:
             W_new = torch.as_tensor(W_np, dtype=torch.float64)
             b_new = torch.as_tensor(b_np, dtype=torch.float64)
             if W_new.shape[0] > 0:
-                if c_new is None:
-                    c_new = self._warm_start(W_new, b_new, verbose)
-                else:
-                    c_new = torch.as_tensor(c_new, dtype=torch.float64).reshape(-1)
+                c_new = self._initial_outer_weights(W_new, b_new, c_new, verbose)
                 W = torch.cat([W, W_new], dim=0)
                 b = torch.cat([b, b_new], dim=0)
                 c = torch.cat([c, c_new], dim=0)
@@ -385,7 +383,7 @@ class PDAP:
         if isinstance(self.model, SemiconcaveModel):
             result["C"] = float(self.model.C.detach())
         if verbose:
-            logger.info("  +---------+---------+--------+--------+--------------+--------------+------------+------------+")
+            logger.info("  +---------+---------+--------+--------------+--------------+------------+------------+")
             logger.info("Result")
             logger.info("  +------------------+--------------------------+")
             logger.info("  | %-16s | %-24d |", "best iteration", best_iteration_train + 1)
