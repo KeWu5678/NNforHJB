@@ -14,7 +14,6 @@ from typing import Optional, Tuple
 import logging
 
 import torch
-from torch.nn.utils import parameters_to_vector, vector_to_parameters
 
 from ..SSN.penalty import _phi
 from ..eval import data_loss_terms
@@ -157,15 +156,6 @@ class SignedModel(ShallowNetwork):
             raise RuntimeError("no support yet; call set_atoms() first")
         x_det = x.detach()
         return self.forward_network_matrix(x_det), self.forward_gradient_kernel(x_det)
-
-    def _trainable(self):
-        return [p for p in self.parameters() if p.requires_grad]
-
-    def get_theta(self) -> torch.Tensor:
-        return parameters_to_vector(self._trainable()).detach().clone()
-
-    def set_theta(self, theta: torch.Tensor) -> None:
-        vector_to_parameters(theta, self._trainable())
 
     def penalty_masks(self) -> Tuple[torch.Tensor, torch.Tensor]:
         n = self.n_neurons

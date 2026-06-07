@@ -14,7 +14,7 @@ tests assert conformance with ``isinstance``.
 
 from __future__ import annotations
 
-from typing import Dict, Optional, Protocol, Tuple, runtime_checkable
+from typing import Dict, Iterator, Optional, Protocol, Tuple, runtime_checkable
 
 import numpy as np
 import torch
@@ -38,6 +38,9 @@ class PDAPModel(Protocol):
     input_dim: Optional[int]
     last_fit_summary: Dict
 
+    # --- the model is an nn.Module: theta is its trainable parameters ---
+    def parameters(self, recurse: bool = True) -> Iterator[torch.nn.Parameter]: ...
+
     # --- atom support ---
     @property
     def n_neurons(self) -> int: ...
@@ -49,9 +52,11 @@ class PDAPModel(Protocol):
     def predict(self, x) -> Tuple[np.ndarray, np.ndarray]: ...
 
     # --- linear-in-theta interface for the SSN solve ---
+    # theta (the SSN working vector) is the model's trainable parameters, read and
+    # written by the trainer with torch's parameters_to_vector / vector_to_parameters
+    # built-ins -- so the contract carries only what those can't express: the
+    # feature maps and the penalty/nonneg structure.
     def jacobians(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]: ...
-    def get_theta(self) -> torch.Tensor: ...
-    def set_theta(self, theta: torch.Tensor) -> None: ...
     def penalty_masks(self) -> Tuple[torch.Tensor, torch.Tensor]: ...
 
     # --- training objective, for the trainer's loss recording ---

@@ -1,12 +1,13 @@
 """Trainer-side SSN outer-weight solve, shared by every model.
 
-A model is linear in its outer parameters ``theta`` for this solve. It exposes
-the feature maps (``jacobians`` -> ``(Phi_v, Phi_g)``), the current ``theta``
-(``get_theta``), the penalized / nonnegative coordinate masks
-(``penalty_masks``), and a way to write ``theta`` back (``set_theta``). The data
-Hessian is the Gauss-Newton form ``(1/Nx)(w1 Phi_v'Phi_v + w2 Phi_g'Phi_g)``;
-the closure is the data loss on ``Phi @ theta`` plus the nonconvex penalty on the
-penalized block. :class:`src.SSN.SSN` owns the semismooth-Newton step.
+A model is linear in its outer parameters ``theta`` for this solve. ``theta`` is
+just the model's trainable ``nn.Module`` parameters, read and written with torch's
+``parameters_to_vector`` / ``vector_to_parameters``; the model only has to supply
+the feature maps (``jacobians`` -> ``(Phi_v, Phi_g)``) and the penalized /
+nonnegative coordinate masks (``penalty_masks``). The data Hessian is the
+Gauss-Newton form ``(1/Nx)(w1 Phi_v'Phi_v + w2 Phi_g'Phi_g)``; the closure is the
+data loss on ``Phi @ theta`` plus the nonconvex penalty on the penalized block.
+:class:`src.SSN.SSN` owns the semismooth-Newton step.
 
 SSN hyperparameters (alpha, gamma, th, power, lr, method, line-search/trust-region
 tolerances) are read from the model, where the config places them.
@@ -18,6 +19,7 @@ import logging
 from typing import TYPE_CHECKING, Dict
 
 import torch
+from torch.nn.utils import parameters_to_vector, vector_to_parameters
 
 from ..SSN import SSN
 from ..SSN.penalty import _phi
@@ -43,7 +45,11 @@ def ssn_solve(model: "PDAPModel", data_train, *, iterations: int, verbose: bool 
 
     H = (w1 / Nx) * (Phi_v.T @ Phi_v) + (w2 / Nx) * (Phi_g.T @ Phi_g)
 
-    theta = torch.nn.Parameter(model.get_theta())
+    # theta is the model's trainable parameters flattened (output weights for the
+    # signed net; [c | C | a | b0] for the semiconcave model).  SSN solves the
+    # linear-in-theta subproblem on a standalone copy, then writes it back.
+    params = [p for p in model.parameters() if p.requires_grad]
+    theta = torch.nn.Parameter(parameters_to_vector(params).detach().clone())
     penalized, nonneg = model.penalty_masks()
 
     optimizer = SSN(
@@ -77,7 +83,7 @@ def ssn_solve(model: "PDAPModel", data_train, *, iterations: int, verbose: bool 
             made_progress = True
         prev = loss
 
-    model.set_theta(theta.detach())
+    vector_to_parameters(theta.detach(), params)
     summary = {
         "best_step": iterations - 1,
         "best_train_loss": prev,

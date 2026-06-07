@@ -360,7 +360,7 @@ class PDAP:
             "best_err_h1_train": self.err_h1_train[best_iteration_train],
         }
         if isinstance(self.model, SemiconcaveModel):
-            result["C"] = float(self.model.C)
+            result["C"] = float(self.model.C.detach())
         if verbose:
             logger.info("  +---------+---------+--------+--------+--------------+--------------+------------+------------+")
             logger.info("Result")
