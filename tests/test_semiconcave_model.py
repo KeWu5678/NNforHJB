@@ -6,7 +6,7 @@ import torch
 from torch.nn.utils import parameters_to_vector
 
 from src.SSN import SSN
-from src.PDAP.ssn_solve import ssn_solve
+from src.PDAP.ssn_solve import ssn_solve, Objective, SolverConfig
 from src.eval import relative_errors
 from src.models.semiconcave import SemiconcaveModel
 
@@ -68,7 +68,7 @@ def test_predict_matches_linear_features():
     d, N, n = 2, 40, 4
     x = torch.randn(N, d, dtype=torch.float64)
     W, b = _atoms(n, d)
-    m = SemiconcaveModel(alpha=1e-3, gamma=1.0, power=1.0, verbose=False)
+    m = SemiconcaveModel(power=1.0, verbose=False)
     m.set_atoms(W, b, torch.tensor([1.0, 0.5, 0.0, 2.0], dtype=torch.float64))
     _set_structural(m, C=1.3, a=[0.2, -0.4], b0=0.7)
     Phi_v, Phi_g = m.jacobians(x)
@@ -82,7 +82,7 @@ def test_augmented_hessian_matches_autograd():
     d, N, n = 2, 40, 4
     x = torch.randn(N, d, dtype=torch.float64)
     W, b = _atoms(n, d, seed=3)
-    m = SemiconcaveModel(alpha=1e-3, gamma=1.0, power=1.0, verbose=False)
+    m = SemiconcaveModel(power=1.0, verbose=False)
     m.set_atoms(W, b, torch.zeros(n))
     Phi_v, Phi_g = m.jacobians(x)
     Vt = torch.randn(N, dtype=torch.float64)
@@ -103,15 +103,15 @@ def test_train_ssn_recovers_synthetic_semiconcave_target():
     d, N, n = 2, 80, 4
     x = torch.randn(N, d, dtype=torch.float64)
     W, b = _atoms(n, d, seed=7)
-    truth = SemiconcaveModel(alpha=1e-4, gamma=1.0, power=1.0, verbose=False)
+    truth = SemiconcaveModel(power=1.0, verbose=False)
     truth.set_atoms(W, b, torch.tensor([1.5, 0.0, 0.8, 0.0], dtype=torch.float64))
     _set_structural(truth, C=2.0, a=[0.3, 0.1], b0=-0.5)
     V, dV = truth.predict_tensors(x)
 
-    fit = SemiconcaveModel(alpha=1e-4, gamma=1.0, power=1.0, verbose=False)
+    fit = SemiconcaveModel(power=1.0, verbose=False)
     fit.set_atoms(W, b, torch.full((n,), 0.1, dtype=torch.float64))
     _set_structural(fit, C=0.5, a=[0.0, 0.0], b0=0.0)
-    ssn_solve(fit, (x, V, dV), iterations=25)
+    ssn_solve(fit, (x, V, dV), Objective(alpha=1e-4, gamma=1.0, th=0.5), SolverConfig(), iterations=25)
 
     _, _, h1 = relative_errors(*fit.predict_tensors(x), V, dV)
     assert h1 < 1e-2

@@ -23,44 +23,22 @@ logger = logging.getLogger(__name__)
 class SignedModel(ShallowNetwork):
     def __init__(
         self,
-        alpha: float,
-        gamma: float,
         activation: torch.nn.Module = torch.relu,
         power: float = 2.1,
-        lr: float = 1.0,
-        loss_weights: Tuple[float, float] = (1.0, 1.0),
-        th: float = 0.5,
         verbose: bool = True,
-        method: Optional[str] = None,
-        max_ls_iter: int = 500,
-        tolerance_ls: float = 1.0 + 1e-8,
-        tolerance_grad: float = 0.0,
-        sigmamax: float = 10.0,
     ) -> None:
-        """Store hyperparameters; the network layers are built by ``set_atoms``.
+        """Store the forward-defining parameters; layers are built by ``set_atoms``.
 
-        Args:
-            power: activation power (q = 2/(power+1)).
-            loss_weights: (value_loss, gradient_loss) weights.
-            th: L1 (th=0) <-> non-convex (th=1) penalty interpolation.
+        The objective and SSN-solver hyperparameters are the trainer's, not the
+        model's (see :mod:`src.PDAP.ssn_solve`).  ``power`` defines the activation
+        ``sigma^p`` and induces the penalty exponent ``q = 2/(power+1)``.
         """
         # Bare nn.Module init -- no atoms/layers yet (built by set_atoms).
         torch.nn.Module.__init__(self)
         self.activation = activation
         self.power = power
         self.q = 2.0 / (power + 1.0)
-        self.alpha = alpha
-        self.gamma = gamma
-        self.lr = lr
-        self.loss_weights = loss_weights
-        self.th = th
         self.verbose = verbose
-        # SSN solver settings (read by the trainer).
-        self.method = method
-        self.max_ls_iter = max_ls_iter
-        self.tolerance_ls = tolerance_ls
-        self.tolerance_grad = tolerance_grad
-        self.sigmamax = sigmamax
         self.input_dim: Optional[int] = None
         self.last_fit_summary: dict = {}
 

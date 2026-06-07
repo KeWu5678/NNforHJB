@@ -16,14 +16,14 @@ def _atoms(n=4, d=2):
 
 
 def test_signed_model_is_pdap_model():
-    m = SignedModel(alpha=1e-4, gamma=0.1, power=1.0, verbose=False)
+    m = SignedModel(power=1.0, verbose=False)
     m.input_dim = 2
     m.set_atoms(*_atoms())
     assert isinstance(m, PDAPModel)
 
 
 def test_semiconcave_model_is_pdap_model():
-    m = SemiconcaveModel(alpha=1e-4, gamma=0.1, power=1.0, verbose=False)
+    m = SemiconcaveModel(power=1.0, verbose=False)
     m.input_dim = 2
     m.set_atoms(*_atoms())
     assert isinstance(m, PDAPModel)
@@ -33,7 +33,7 @@ def test_both_models_predict_to_numpy():
     """predict() returns numpy (V, dV) for both — the gap SignedModel had filled."""
     x = torch.randn(6, 2, dtype=torch.float64).numpy()
     for cls in (SignedModel, SemiconcaveModel):
-        m = cls(alpha=1e-4, gamma=0.1, power=1.0, verbose=False)
+        m = cls(power=1.0, verbose=False)
         m.input_dim = 2
         m.set_atoms(*_atoms())
         V, dV = m.predict(x)

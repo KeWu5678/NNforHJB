@@ -56,14 +56,15 @@ def test_config_builds_pdap() -> None:
 
     pdap = PDAP(cfg, data)
 
-    assert pdap.alpha == cfg.model.alpha == 1e-5
+    # objective hyperparameters live on the trainer, not the model
+    assert pdap.objective.alpha == cfg.model.alpha == 1e-5
+    assert pdap.objective.gamma == 0.5
     assert pdap.insertion_kind == "profile"
     assert type(pdap.model).__name__ == "SignedModel"
-    assert pdap.model.gamma == 0.5
     assert pdap.model.power == cfg.model.power
     assert pdap.activation_fn is torch.relu
-    # surfaced solver/insertion constants come from the training section
-    assert pdap.model.max_ls_iter == 500
+    # solver settings live on the trainer; insertion constants on the PDAP loop
+    assert pdap.solver.max_ls_iter == 500
     assert pdap.fit_outer_iterations == 20
     assert pdap.ins_merge_tol == 1e-2
 

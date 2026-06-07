@@ -16,7 +16,8 @@ tolerances) are read from the model, where the config places them.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Dict
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Dict, Tuple
 
 import torch
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
@@ -28,6 +29,33 @@ if TYPE_CHECKING:
     from ..models.base import PDAPModel
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class Objective:
+    """What is minimized: data fidelity (loss_weights) + the nonconvex penalty.
+
+    The penalty exponent q is *not* here -- it is q = 2/(power+1), derived from
+    the model's activation power (the prox closed-forms depend on it), so it lives
+    on the model.
+    """
+
+    alpha: float = 1e-5
+    gamma: float = 0.0
+    th: float = 0.5
+    loss_weights: Tuple[float, float] = (1.0, 1.0)
+
+
+@dataclass(frozen=True)
+class SolverConfig:
+    """How the SSN outer solve is run (globalization + line-search tolerances)."""
+
+    lr: float = 1.0
+    method: str = "levenberg_marquardt"
+    max_ls_iter: int = 500
+    tolerance_ls: float = 1.0 + 1e-8
+    tolerance_grad: float = 0.0
+    sigmamax: float = 10.0
 
 
 def nonconvex_penalty(
@@ -48,7 +76,10 @@ def nonconvex_penalty(
     return alpha * torch.sum(_phi(arg, th, gamma))
 
 
-def ssn_solve(model: "PDAPModel", data_train, *, iterations: int, verbose: bool = False) -> Dict:
+def ssn_solve(
+    model: "PDAPModel", data_train, objective: Objective, solver: SolverConfig,
+    *, iterations: int, verbose: bool = False,
+) -> Dict:
     """Solve for the model's outer weights in place; return a fit summary."""
     X, V, dV = data_train
     Phi_v, Phi_g = model.jacobians(X)
@@ -58,8 +89,8 @@ def ssn_solve(model: "PDAPModel", data_train, *, iterations: int, verbose: bool 
     dVt = dV.reshape(-1).detach()
     N, d = X.shape[0], X.shape[1]
     Nx = N * d
-    w1, w2 = model.loss_weights
-    alpha, gamma, th, q = model.alpha, model.gamma, model.th, model.q
+    w1, w2 = objective.loss_weights
+    alpha, gamma, th, q = objective.alpha, objective.gamma, objective.th, model.q
 
     H = (w1 / Nx) * (Phi_v.T @ Phi_v) + (w2 / Nx) * (Phi_g.T @ Phi_g)
 
@@ -73,9 +104,9 @@ def ssn_solve(model: "PDAPModel", data_train, *, iterations: int, verbose: bool 
     optimizer = SSN(
         [theta], alpha=alpha, gamma=gamma,
         penalized_mask=penalized, nonneg_mask=nonneg,
-        th=th, lr=model.lr, power=model.power, method=model.method,
-        max_ls_iter=model.max_ls_iter, tolerance_ls=model.tolerance_ls,
-        tolerance_grad=model.tolerance_grad, sigmamax=model.sigmamax,
+        th=th, lr=solver.lr, power=model.power, method=solver.method,
+        max_ls_iter=solver.max_ls_iter, tolerance_ls=solver.tolerance_ls,
+        tolerance_grad=solver.tolerance_grad, sigmamax=solver.sigmamax,
     )
     optimizer.data_hessian = H
 

@@ -22,19 +22,12 @@ import torch
 
 @runtime_checkable
 class PDAPModel(Protocol):
-    # --- SSN hyperparameters (config lives on the model; the trainer reads them) ---
-    alpha: float
-    gamma: float
-    th: float
+    # --- forward-defining scalars ---
+    # power defines the activation sigma^p; q = 2/(power+1) is the induced penalty
+    # exponent (the prox closed-forms depend on it).  The objective and SSN-solver
+    # hyperparameters are the trainer's, not the model's.
     power: float
     q: float
-    lr: float
-    loss_weights: Tuple[float, float]
-    method: str
-    max_ls_iter: int
-    tolerance_ls: float
-    tolerance_grad: float
-    sigmamax: float
     input_dim: Optional[int]
     last_fit_summary: Dict
 

@@ -33,41 +33,26 @@ TensorLike = torch.Tensor | np.ndarray
 class SemiconcaveModel(torch.nn.Module):
     def __init__(
         self,
-        alpha: float,
-        gamma: float,
         power: float = 1.0,
-        th: float = 0.5,
         activation: Callable[[torch.Tensor], torch.Tensor] | None = None,
-        loss_weights: Tuple[float, float] = (1.0, 1.0),
-        lr: float = 1.0,
         c_init: float = 1.0,
         verbose: bool = True,
         dtype: torch.dtype = torch.float64,
-        method: str = "levenberg_marquardt",
-        max_ls_iter: int = 500,
-        tolerance_ls: float = 1.0 + 1e-8,
-        tolerance_grad: float = 0.0,
-        sigmamax: float = 10.0,
     ) -> None:
+        """Store the forward-defining parameters; the support is set by ``set_atoms``.
+
+        Objective and SSN-solver hyperparameters are the trainer's (see
+        :mod:`src.PDAP.ssn_solve`); ``power`` defines the atom ``sigma^p`` and the
+        penalty exponent ``q = 2/(power+1)``.
+        """
         if power < 1.0:
             raise ValueError("semiconcave model requires a convex atom: power >= 1")
         super().__init__()
-        self.alpha = float(alpha)
-        self.gamma = float(gamma)
-        self.th = float(th)
         self.power = float(power)
         self.q = 2.0 / (self.power + 1.0)
         self.activation = activation if activation is not None else torch.relu
-        self.lr = float(lr)
         self.verbose = verbose
         self.dtype = dtype
-        # SSN solver settings (read by the trainer).
-        self.method = method
-        self.max_ls_iter = max_ls_iter
-        self.tolerance_ls = tolerance_ls
-        self.tolerance_grad = tolerance_grad
-        self.sigmamax = sigmamax
-        self.loss_weights = (float(loss_weights[0]), float(loss_weights[1]))
 
         # Trainable parameters in theta-order [c | C | a | b0].  c and a are
         # resized once the support / input dimension are known (set_atoms /

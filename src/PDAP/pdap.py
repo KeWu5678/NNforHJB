@@ -29,7 +29,7 @@ from torch.nn.utils import parameters_to_vector
 from ..eval import relative_errors, data_loss_terms
 from .insertion import profile_threshold, finite_step
 from .warmstart import warm_start
-from .ssn_solve import ssn_solve, nonconvex_penalty
+from .ssn_solve import ssn_solve, nonconvex_penalty, Objective, SolverConfig
 
 logger = logging.getLogger(__name__)
 
@@ -50,11 +50,21 @@ class PDAP:
         if m.insertion not in ("profile", "finite_step"):
             raise ValueError(f"model.insertion must be 'profile' or 'finite_step', got {m.insertion!r}")
 
-        self.alpha = float(m.alpha)
         self.insertion_kind = m.insertion
         self.activation_fn = get_activation(m.activation)
         self._use_sphere = bool(m.use_sphere)
         self.verbose = bool(cfg.env.verbose)
+        # The objective (what is minimized) and the SSN solver settings are the
+        # trainer's, not the model's.
+        self.objective = Objective(
+            alpha=float(m.alpha), gamma=float(m.gamma), th=float(m.th),
+            loss_weights=tuple(m.loss_weights),
+        )
+        self.solver = SolverConfig(
+            lr=float(t.lr), method=t.method, max_ls_iter=int(t.max_ls_iter),
+            tolerance_ls=float(t.tolerance_ls), tolerance_grad=float(t.tolerance_grad),
+            sigmamax=float(t.sigmamax),
+        )
         # outer-loop + insertion settings (threaded into fit / _insert)
         self.fit_outer_iterations = int(t.fit_outer_iterations)
         self.ins_merge_tol = float(t.ins_merge_tol)
@@ -62,10 +72,6 @@ class PDAP:
         self.lbfgs_steps = int(t.lbfgs_steps)
         self.newton_tol = float(t.newton_tol)
         self.newton_max_iter = int(t.newton_max_iter)
-        _solver_kwargs = dict(
-            method=t.method, max_ls_iter=t.max_ls_iter, tolerance_ls=t.tolerance_ls,
-            tolerance_grad=t.tolerance_grad, sigmamax=t.sigmamax,
-        )
 
         # histories
         self.train_loss: List[float] = []
@@ -81,7 +87,6 @@ class PDAP:
 
         from ..data import split_value_samples
 
-        loss_weights = tuple(m.loss_weights)
         # Input dimension is a property of the data, not the model: read it here
         # and inject it, rather than having the model discover it during prep.
         self.input_dim = int(data["x"].shape[1])
@@ -91,18 +96,14 @@ class PDAP:
             # signed network: convex atoms not required => two-sided dual test.
             self.two_sided = True
             self.model = SignedModel(
-                alpha=m.alpha, gamma=m.gamma, activation=self.activation_fn,
-                power=m.power, lr=t.lr, loss_weights=loss_weights, th=m.th, verbose=self.verbose,
-                **_solver_kwargs,
+                activation=self.activation_fn, power=m.power, verbose=self.verbose,
             )
             self.model.input_dim = self.input_dim
         else:
             # semiconcave: convex g => one-sided dual test (nonnegative mass).
             self.two_sided = False
             self.model = SemiconcaveModel(
-                alpha=m.alpha, gamma=m.gamma, power=m.power, th=m.th, activation=self.activation_fn,
-                loss_weights=loss_weights, lr=t.lr, c_init=m.c_init, verbose=self.verbose,
-                **_solver_kwargs,
+                power=m.power, activation=self.activation_fn, c_init=m.c_init, verbose=self.verbose,
             )
             self.model.input_dim = self.input_dim
             self.model._ensure_affine(self.input_dim)
@@ -115,8 +116,8 @@ class PDAP:
             logger.info("  | %-16s | %-24s |", "insertion rule", self.insertion_kind.replace("_", " "))
             logger.info("  | %-16s | %-24s |", "samples", f"{train_count} train, {valid_count} validation")
             logger.info("  | %-16s | %-24d |", "input dimension", self.input_dim)
-            logger.info("  | %-16s | %-24.2e |", "alpha", self.alpha)
-            logger.info("  | %-16s | %-24.2e |", "gamma", self.model.gamma)
+            logger.info("  | %-16s | %-24.2e |", "alpha", self.objective.alpha)
+            logger.info("  | %-16s | %-24.2e |", "gamma", self.objective.gamma)
             logger.info("  | %-16s | %-24.3g |", "activation power", self.model.power)
             logger.info("  +------------------+--------------------------+")
 
@@ -211,23 +212,25 @@ class PDAP:
         model's penalized parameters (same term the SSN closure uses).
         """
         X, V, dV = data
+        o = self.objective
         Vp, dVp = self.model.predict_tensors(X)
-        data_loss = data_loss_terms(Vp, dVp, V, dV, self.model.loss_weights)[0]
+        data_loss = data_loss_terms(Vp, dVp, V, dV, o.loss_weights)[0]
         theta = parameters_to_vector([p for p in self.model.parameters() if p.requires_grad]).detach()
         penalized, nonneg = self.model.penalty_masks()
         penalty = nonconvex_penalty(
             theta, penalized, nonneg,
-            alpha=self.model.alpha, th=self.model.th, gamma=self.model.gamma, q=self.model.q,
+            alpha=o.alpha, th=o.th, gamma=o.gamma, q=self.model.q,
         )
         return float((data_loss + penalty).detach())
 
     def _warm_start(self, W: torch.Tensor, b: torch.Tensor, verbose: bool) -> torch.Tensor:
         """Coordinate-descent initial outer weights for new atoms (W, b)."""
+        o = self.objective
         return warm_start(
             W, b, self._residual(self.data_train), self.data_train[0],
             activation=self.activation_fn, power=self.model.power,
-            loss_weights=self.model.loss_weights, alpha=self.alpha,
-            th=self.model.th, gamma=self.model.gamma,
+            loss_weights=o.loss_weights, alpha=o.alpha,
+            th=o.th, gamma=o.gamma,
             use_sphere=self._use_sphere, nonneg=not self.two_sided, verbose=verbose,
         )
 
@@ -242,7 +245,7 @@ class PDAP:
 
         common = dict(
             activation=self.activation_fn, power=self.model.power,
-            loss_weights=self.model.loss_weights, alpha=self.alpha,
+            loss_weights=self.objective.loss_weights, alpha=self.objective.alpha,
             sample_sphere=self.sample_uniform_sphere_points, N=num_insertion,
             max_insert=max_insert, merge_tol=self.ins_merge_tol,
             use_sphere=self._use_sphere, existing_atoms=existing, verbose=verbose,
@@ -300,7 +303,7 @@ class PDAP:
 
             # 1. SSN on outer weights (inner weights frozen)
             fit_summary = ssn_solve(
-                self.model, self.data_train,
+                self.model, self.data_train, self.objective, self.solver,
                 iterations=self.fit_outer_iterations, verbose=verbose,
             )
 
@@ -364,8 +367,8 @@ class PDAP:
         final_neurons = int(self.model.n_neurons)
 
         result = {
-            "alpha": self.alpha, "gamma": self.model.gamma, "power": self.model.power,
-            "loss_weights": tuple(self.model.loss_weights), "activation": self.activation_fn,
+            "alpha": self.objective.alpha, "gamma": self.objective.gamma, "power": self.model.power,
+            "loss_weights": tuple(self.objective.loss_weights), "activation": self.activation_fn,
             "use_sphere": self._use_sphere, "model": type(self.model).__name__,
             "insertion": self.insertion_kind,
             "num_iterations": num_iterations, "num_insertion": num_insertion,
