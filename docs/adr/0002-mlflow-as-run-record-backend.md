@@ -5,14 +5,12 @@ status: proposed
 # MLflow is a backend behind the Run Record interface, not a parallel tracker
 
 We will expose MLflow as a swappable *backend* behind the existing
-`ExperimentRun` / `RunRecordWriter` Run Record interface (`src/experiment_logging.py`),
+`ExperimentRun` Run Record interface (`src/experiment_logging.py`),
 selected by environment: with `MLFLOW_TRACKING_URI` set, a Run Record will be
 logged to MLflow; unset, it will be written as local JSON (the current, and
-current-default, behavior). One interface, two adapters. The seam itself is
-unchanged, though the runners need one small change — persisting the full result
-for local curve storage — described under "What MLflow stores" below. We chose
-this over rewriting the legacy `src/mlflow_utils.py`, over making MLflow the sole
-store, and over running both stores in parallel.
+current-default, behavior). One interface, two adapters. We chose this over
+rewriting the legacy `src/mlflow_utils.py`, over making MLflow the sole store,
+and over running both stores in parallel.
 
 **Implementation status: proposed, not yet built.** As of this ADR,
 `src/experiment_logging.py` always writes local JSON and has no
@@ -35,8 +33,8 @@ adapter lands.
   bookkeeping on every run and two stores that can silently drift.
 - **Keep the legacy `mlflow_utils.py` independent** — rejected: it logs the raw
   `PDAP.fit()` result with duplicated metric loops and two inconsistent run
-  hierarchies; it is to be superseded. The MLflow adapter will log from the same
-  flat summary `RunRecordWriter` consumes, not from PDAP internals.
+  hierarchies; it is to be superseded. The MLflow adapter will log from the
+  canonical Run Record, not from PDAP internals.
 
 ## Consequences
 
@@ -58,10 +56,9 @@ training monitor. That fixes what each side holds:
   dimension is logged as a **param**; the per-point summary scalars (`h1`, `n`,
   `score`, the `best_*` fields) are logged as **metrics**. The comparison views
   (runs table, parallel-coordinates, scatter) are chosen in the MLflow UI at
-  look-time, so logging richly keeps every view open. This is still logged from
-  the flat summary — the `per_gamma` rows of one Run Record fan out into one
-  MLflow run per gamma point — so the "log from the summary, not PDAP internals"
-  rule **survives** (it would only have reversed if curves went into MLflow).
+  look-time, so logging richly keeps every view open. This is logged from the
+  canonical Run Record, so the "log from the record, not PDAP internals" rule
+  survives.
 - **Per-iteration training curves stay local.** They are deliberately *not*
   logged to MLflow. The full `PDAP.fit()` result (loss/error curves, weights) is
   saved as a sibling `result_<run_id>.pkl` Run Artifact on disk and loaded only
@@ -80,13 +77,10 @@ keeps the adapter thin and the MLflow store light.
 
 ## Planned follow-up work (not done yet)
 
-- In the runners, persist the full `PDAP.fit()` result as
-  `result_<run_id>.pkl` per config point. **Currently the curves are discarded**
-  after `best_iteration`, so without this there is nothing to drill into.
 - Add the MLflow adapter + `MLFLOW_TRACKING_URI` backend switch to
   `src/experiment_logging.py`: one run per config point (gamma as an ordinary
   param), summary scalars as metrics, the pickle filename as a tag — logged from
-  the flat summary.
+  the canonical Run Record.
 - Retire `src/mlflow_utils.py` and update the `notebook/pdpa_vdp.ipynb` call
   site once the adapter is proven.
 - Optional one-off: backfill pre-existing `models/*.pkl` results into MLflow via

@@ -8,13 +8,13 @@ curated experiment summaries are now the source of truth; the legacy
    Softplus is the best sparse compromise on the smooth VDP value-sample
    benchmark; Matern 5/2 and Gaussian are more accurate on H1 but use many
    more neurons, while tanh remains the weakest gradient-fitting choice.
-   Current curated readout: [experiments/activationsearch/results.md](/Users/chaoruiz/Documents/Repos/SparseNNforHJB/experiments/activationsearch/results.md)
+   Current curated readout: [experiments/activationsearch_VDP/results.md](/Users/chaoruiz/Documents/Repos/SparseNNforHJB/experiments/activationsearch_VDP/results.md)
 
 2. Finite-step penalty powers.
    The power sweep is non-monotone. Powers around 3-4 form the useful tradeoff
    region; `p=5` stops improving the H1/sparsity balance and is the first clear
    degradation case.
-   Current curated readout: [experiments/penaltypowers/results.md](/Users/chaoruiz/Documents/Repos/SparseNNforHJB/experiments/penaltypowers/results.md)
+   Current curated readout: [experiments/penaltypowers_VDP/results.md](/Users/chaoruiz/Documents/Repos/SparseNNforHJB/experiments/penaltypowers_VDP/results.md)
 
 3. Discontinuous-gradient activation search.
    On the analytic discontinuous-gradient study, the best near-jump behavior
