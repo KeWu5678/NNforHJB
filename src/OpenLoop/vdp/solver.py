@@ -7,6 +7,7 @@ from datetime import datetime
 import json
 from pathlib import Path
 from typing import Callable
+from uuid import uuid4
 
 import numpy as np
 from numpy.polynomial.legendre import legval, legvander
@@ -100,15 +101,17 @@ class VdpOpenLoopSolution:
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
         date = datetime.now().strftime("%Y%m%d") if date_tag is None else date_tag
+        run_dir = output_path / f"VDP_{date}_{uuid4().hex}"
+        run_dir.mkdir(parents=True, exist_ok=False)
         shape_tag = (
             f"grid_{grid_shape[0]}x{grid_shape[1]}"
             if grid_shape is not None
             else f"N{self.value_samples.size}"
         )
         stem = f"VDP_{self.config.profile}_{shape_tag}_{date}"
-        data_path = self.value_samples.save_npz(output_path / f"{stem}.npz")
-        meta_path = output_path / f"VDP_{self.config.profile}_meta_{shape_tag}_{date}.json"
-        failed_path = output_path / f"VDP_{self.config.profile}_failed_{shape_tag}_{date}.json"
+        data_path = self.value_samples.save_npz(run_dir / f"{stem}.npz")
+        meta_path = run_dir / f"VDP_{self.config.profile}_meta_{shape_tag}_{date}.json"
+        failed_path = run_dir / f"VDP_{self.config.profile}_failed_{shape_tag}_{date}.json"
 
         meta = {
             "profile": self.config.profile,
@@ -130,7 +133,7 @@ class VdpOpenLoopSolution:
             if not result.converged
         ]
         failed_path.write_text(json.dumps(failed_payload, indent=2), encoding="utf-8")
-        return {"data": data_path, "meta": meta_path, "failed": failed_path}
+        return {"run_dir": run_dir, "data": data_path, "meta": meta_path, "failed": failed_path}
 
 
 @dataclass(frozen=True)

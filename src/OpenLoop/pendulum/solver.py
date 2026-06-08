@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
+import json
+from pathlib import Path
 from typing import Callable
+from uuid import uuid4
 
 import numpy as np
 
@@ -20,6 +24,7 @@ from src.OpenLoop.pendulum.trajectories import (
     integrate_pmp_trajectory,
     uniform_boundary_angles,
 )
+from src.paths import DATA_DIR
 
 
 @dataclass(frozen=True)
@@ -77,6 +82,37 @@ class PendulumValueSolution:
     restricted_trajectories: tuple[PmpTrajectory, ...]
     nonsmooth_curve: NonsmoothCurve
     diagnostics: SolverDiagnostics
+
+    def save_dataset(
+        self,
+        output_dir: str | Path = DATA_DIR,
+        *,
+        date_tag: str | None = None,
+    ) -> dict[str, Path]:
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+        date = datetime.now().strftime("%Y%m%d") if date_tag is None else date_tag
+        run_dir = output_path / f"Pendulum_{date}_{uuid4().hex}"
+        run_dir.mkdir(parents=True, exist_ok=False)
+
+        stem = f"Pendulum_pmp_value_samples_{self.diagnostics.requested_trajectories}_{date}"
+        data_path = self.value_samples.save_npz(run_dir / f"{stem}.npz")
+        meta_path = run_dir / f"Pendulum_pmp_value_samples_meta_{date}.json"
+        failed_path = run_dir / f"Pendulum_pmp_value_samples_failed_{date}.json"
+
+        meta = {
+            "requested_trajectories": self.diagnostics.requested_trajectories,
+            "integrated_trajectories": self.diagnostics.integrated_trajectories,
+            "nonsmooth_points": self.diagnostics.nonsmooth_points,
+            "discarded_points": self.diagnostics.discarded_points,
+            "retained_points": self.diagnostics.retained_points,
+        }
+        meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+        failed_path.write_text(
+            json.dumps(self.diagnostics.failed_trajectories, indent=2),
+            encoding="utf-8",
+        )
+        return {"run_dir": run_dir, "data": data_path, "meta": meta_path, "failed": failed_path}
 
 
 class PendulumPmpSolver:

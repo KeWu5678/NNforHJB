@@ -242,6 +242,32 @@ def test_solver_emits_value_samples_and_diagnostics() -> None:
     assert solution.diagnostics.retained_points == solution.value_samples.size
 
 
+def test_pendulum_solution_save_dataset_uses_run_folder(tmp_path) -> None:
+    solver = PendulumPmpSolver(
+        config=PendulumPmpSolverConfig(
+            value_max=0.5,
+            t_final=2.0,
+            max_step=0.02,
+            num_trajectories=4,
+            adaptive_sampling=False,
+            contour_delta=0.25,
+        )
+    )
+
+    solution = solver.solve()
+    paths = solution.save_dataset(tmp_path, date_tag="20260605")
+
+    assert paths["run_dir"].name.startswith("Pendulum_20260605_")
+    assert paths["data"].name == "Pendulum_pmp_value_samples_4_20260605.npz"
+    assert paths["data"].parent == paths["run_dir"]
+    assert paths["meta"].parent == paths["run_dir"]
+    assert paths["failed"].parent == paths["run_dir"]
+    loaded = ValueSamples.load_npz(paths["data"])
+    assert loaded.x.shape[1] == 2
+    assert paths["meta"].exists()
+    assert paths["failed"].exists()
+
+
 def _trajectory(
     states: list[list[float]],
     values: list[float],
