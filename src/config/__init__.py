@@ -9,7 +9,7 @@ from .schema import (
     EnvConfig,
     ExperimentConfig,
 )
-from .activations import ACTIVATIONS, get_activation
+from .activations import ACTIVATIONS, get_activation, get_use_sphere
 from .store import register_configs
 
 __all__ = [
@@ -20,5 +20,6 @@ __all__ = [
     "ExperimentConfig",
     "ACTIVATIONS",
     "get_activation",
+    "get_use_sphere",
     "register_configs",
 ]

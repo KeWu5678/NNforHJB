@@ -10,8 +10,8 @@ Four sections compose into :class:`ExperimentConfig`:
   * ``env``      — runtime: seed + logging.
 
 Every default equals the value currently in force for the VDP signed-profile
-baseline (``scripts/run_activation_experiment.py``) and the hardcoded library
-literals, so the default ``ExperimentConfig`` reproduces today's behavior.
+baseline and the hardcoded library literals, so the default
+``ExperimentConfig`` reproduces today's behavior.
 
 The config is **domain-agnostic** — it describes the PDAP model and how it is
 trained, not any specific control problem. The only problem-specific input is
@@ -30,8 +30,9 @@ class ModelConfig:
 
     ``kind`` and ``insertion`` form the model identity (the ``conf/model/*.yaml``
     config group: signed/profile, semiconcave/profile, signed/finite_step).
-    ``activation`` is a registry name resolved to a callable at build time;
-    ``use_sphere`` is set by hand to match the activation's geometry.
+    ``activation`` is a registry name resolved to a callable at build time; its
+    sphere geometry is bundled with the activation in the registry (see
+    ``src.config.activations``), not configured here.
     """
 
     # identity
@@ -42,9 +43,6 @@ class ModelConfig:
     power: float = 1.0
     # (w1, w2) = (value loss weight, gradient loss weight); l2 = (1, 0), h1 = (1, 1)
     loss_weights: Tuple[float, float] = (1.0, 1.0)
-    # sample candidate directions on S^d — valid only for positively-homogeneous
-    # activations (relu, abs, ...); set by hand to match the chosen activation.
-    use_sphere: bool = True
     c_init: float = 1.0           # semiconcave only
     # Regularization.  The penalty on the atom weights is  alpha * sum_i phi(|c_i|^q),
     # with q = 2/(power+1) (power is the activation exponent set above).  The two
