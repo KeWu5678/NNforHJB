@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import pickle
 import random
 import sys
 from pathlib import Path
@@ -45,6 +46,31 @@ from src.logging_config import configure_logging
 logger = logging.getLogger(__name__)
 
 
+def _slug(value: object) -> str:
+    return str(value).replace(".", "p").replace("-", "m").replace(" ", "")
+
+
+def run_id_from_config(cfg: DictConfig) -> str:
+    weights = tuple(float(value) for value in cfg.model.loss_weights)
+    if weights == (1.0, 1.0):
+        loss = "h1"
+    elif weights == (1.0, 0.0):
+        loss = "l2"
+    else:
+        loss = "loss" + "_".join(_slug(value) for value in weights)
+    return "_".join(
+        [
+            str(cfg.model.kind),
+            str(cfg.model.insertion),
+            str(cfg.model.activation),
+            f"power{_slug(cfg.model.power)}",
+            f"gamma{_slug(cfg.model.gamma)}",
+            loss,
+            f"seed{cfg.env.seed}",
+        ]
+    )
+
+
 def set_seed(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
@@ -53,16 +79,21 @@ def set_seed(seed: int) -> None:
 
 @hydra.main(version_base=None, config_path="../conf", config_name="config")
 def main(cfg: DictConfig) -> None:
-    configure_logging(verbose=cfg.env.verbose, level=cfg.env.log_level, log_file=cfg.env.log_file)
+    # Every run logs to its own file in the Hydra output dir, so parallel sweep
+    # workers (joblib) don't interleave their progress tables on the shared
+    # console. `env.verbose` still controls console streaming; `env.log_file`
+    # overrides the per-run default when set.
+    run_dir = Path(HydraConfig.get().runtime.output_dir)
+    log_file = cfg.env.log_file or (run_dir / "run.log")
+    configure_logging(verbose=cfg.env.verbose, level=cfg.env.log_level, log_file=log_file)
     set_seed(cfg.env.seed)
 
     # Create the run record before model construction/training so elapsed_s covers
     # the actual run, not only JSON serialization.
-    run_dir = Path(HydraConfig.get().runtime.output_dir)
     run = ExperimentRun(
         output_dir=run_dir,
         name=cfg.name,
-        run_id=f"{cfg.model.kind}_{cfg.model.insertion}_seed{cfg.env.seed}",
+        run_id=run_id_from_config(cfg),
         config=OmegaConf.to_container(cfg, resolve=True),
     )
 
@@ -82,29 +113,30 @@ def main(cfg: DictConfig) -> None:
         num_insertion=cfg.training.num_insertion,
         max_insert=cfg.training.max_insert,
         amp_tol=cfg.training.prune_amp_tol,
-        verbose=cfg.env.verbose,
+        # Always emit the progress tables to the logger so every run's log file is
+        # complete. `env.verbose` only controls whether they also stream to the
+        # console (configure_logging above) — which interleaves under parallel
+        # sweeps, so leave it off and read the per-run run.log instead.
+        verbose=True,
     )
 
-    # Report the relative errors + sparsity metrics at the selected best iteration.
-    bi = int(history.best_iteration)
-    metrics = {
-        "rel_l2_train": float(history.err_l2_train[bi]),
-        "rel_l2_val": float(history.err_l2_val[bi]),
-        "rel_grad_train": float(history.err_grad_train[bi]),
-        "rel_grad_val": float(history.err_grad_val[bi]),
-        "rel_h1_train": float(history.err_h1_train[bi]),
-        "rel_h1_val": float(history.err_h1_val[bi]),
-        "best_iteration": bi,
-        "best_neurons": int(history.best_neurons),
-        "final_neurons": int(history.final_neurons),
-    }
+    metrics = history.summary_metrics()
     logger.info(
         "best iter %d | neurons %d | rel-L2 %.3e | rel-semiH1 %.3e | rel-H1 %.3e (val)",
-        bi, metrics["best_neurons"], metrics["rel_l2_val"], metrics["rel_grad_val"], metrics["rel_h1_val"],
+        metrics["best_iteration"],
+        metrics["best_neurons"],
+        metrics["rel_l2_val"],
+        metrics["rel_grad_val"],
+        metrics["rel_h1_val"],
     )
 
-    # Persist a run record into Hydra's per-run output dir (Hydra also writes
-    # .hydra/config.yaml). Experiment-tracking config is deferred.
+    artifact = run_dir / f"result_{run.run_id}.pkl"
+    with artifact.open("wb") as file:
+        pickle.dump(history, file)
+    run.add_artifact("fit_history", artifact)
+
+    # Persist the run record into Hydra's per-run output dir (Hydra also writes
+    # .hydra/config.yaml). MLflow can be added as a backend behind this interface.
     run.log_metrics(metrics)
     record = run.finish(status="completed")
     logger.info("run record: %s", record)
