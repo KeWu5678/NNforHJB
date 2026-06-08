@@ -14,12 +14,11 @@ Raw datasets, logs, run records, Hydra output, and intermediate plots stay under
 
 Top-level `scripts/` is reserved for generic reusable entry points.
 Domain-specific runners may remain in `scripts/` while they are legacy and
-unclassified, but new curated experiments should have an
-`experiments/<name>/run.py` orchestrator. The experiment orchestrator owns sweep
-policy, repeated calls, aggregation triggers, and output layout, but it should
-use the existing PDAP/config interface (`PDAP.from_config(...)` and
-`fit_from_config(...)`) plus shared data, logging, and plotting utilities rather
-than reimplementing PDAP training or adding a second training interface.
+unclassified, but curated experiments should not add a second training
+interface. The root `Makefile` owns the public command and Hydra multirun sweep
+axes. Each experiment directory owns the research question, analysis, figures,
+and Markdown results, while `scripts/train.py` owns one Hydra-composed PDAP
+training config point.
 
 The generic runner boundary is deliberately narrow: run one independent PDAP
 training config point on one dataset, compose the configured PDAP model, train
@@ -69,6 +68,6 @@ runners, but the benefit is a clear separation between curated research
 definitions, reusable execution machinery, and disposable local artifacts.
 
 The current `scripts/train.py` name is provisional: its role is narrower than
-generic "training" and should be reconsidered after the experiment orchestrator
-shape is proven. It may be retired entirely or renamed to a one-off PDAP config
-runner if curated experiment runners become the normal execution path.
+generic "training" and should be reconsidered after the Makefile/Hydra
+experiment workflow is proven. It may be renamed to a one-off PDAP config
+runner if that vocabulary becomes clearer.

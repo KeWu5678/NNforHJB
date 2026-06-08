@@ -23,6 +23,7 @@ dependencies = [
     "ipykernel>=6.29",
     # Tests
     "pytest>=8.3",
+    "hydra-joblib-launcher>=1.2.0",
 ]
 
 [project.optional-dependencies]

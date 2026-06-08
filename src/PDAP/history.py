@@ -81,3 +81,18 @@ class History:
     @property
     def best_err_h1_train(self) -> float:
         return self.err_h1_train[self.best_iteration]
+
+    def summary_metrics(self) -> dict[str, float | int]:
+        """Scalar comparison metrics at the selected best iteration."""
+        i = int(self.best_iteration)
+        return {
+            "rel_l2_train": float(self.err_l2_train[i]),
+            "rel_l2_val": float(self.err_l2_val[i]),
+            "rel_grad_train": float(self.err_grad_train[i]),
+            "rel_grad_val": float(self.err_grad_val[i]),
+            "rel_h1_train": float(self.err_h1_train[i]),
+            "rel_h1_val": float(self.err_h1_val[i]),
+            "best_iteration": i,
+            "best_neurons": int(self.best_neurons),
+            "final_neurons": int(self.final_neurons),
+        }

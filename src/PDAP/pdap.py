@@ -22,6 +22,7 @@ from typing import Tuple
 
 import torch
 
+from ..config.activations import get_use_sphere
 from ..models.signed import SignedModel
 from .insertion import profile_threshold, finite_step
 from .warmstart import warm_start
@@ -44,8 +45,7 @@ class PDAP:
             raise ValueError(f"model.insertion must be 'profile' or 'finite_step', got {m.insertion!r}")
 
         self.insertion_kind = m.insertion
-        self._use_sphere = m.use_sphere
-        self.verbose = cfg.env.verbose
+        self._use_sphere = get_use_sphere(m.activation)
         # The objective (what is minimized) and the SSN solver settings.
         self.objective = Objective(
             alpha=m.alpha, gamma=m.gamma, th=m.th, loss_weights=tuple(m.loss_weights),

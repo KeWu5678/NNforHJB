@@ -60,7 +60,7 @@ def progress_printer(quiet: bool):
 
 def main() -> None:
     args = parse_args()
-    tag = args.tag or time.strftime("%Y%m%d_%H%M%S")
+    date_tag = args.tag or time.strftime("%Y%m%d")
     problem = PendulumSwingUpProblem(control_limit=args.control_limit)
     config = PendulumPmpSolverConfig(
         epsilon=args.epsilon,
@@ -82,15 +82,13 @@ def main() -> None:
     solution = solver.solve(progress=progress_printer(args.quiet))
     elapsed = time.perf_counter() - started
 
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-    data_path = args.output_dir / f"PENDULUM_pmp_value_samples_{args.num_trajectories}_{tag}.npz"
-    meta_path = args.output_dir / f"PENDULUM_pmp_value_samples_meta_{tag}.json"
-
-    solution.value_samples.save_npz(data_path)
+    paths = solution.save_dataset(args.output_dir, date_tag=date_tag)
     metadata = {
         "source_paper": "https://arxiv.org/pdf/2312.17467",
         "description": "Backward-PMP infinite-horizon pendulum ValueSamples.",
-        "data_path": str(data_path),
+        "data_path": str(paths["data"]),
+        "failed_path": str(paths["failed"]),
+        "run_dir": str(paths["run_dir"]),
         "elapsed_seconds": elapsed,
         "problem": {
             "mass": problem.mass,
@@ -104,11 +102,13 @@ def main() -> None:
         "config": config.__dict__,
         "diagnostics": solution.diagnostics.__dict__,
     }
-    meta_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+    paths["meta"].write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
     if not args.quiet:
-        print(f"saved data: {data_path}")
-        print(f"saved metadata: {meta_path}")
+        print(f"saved run dir: {paths['run_dir']}")
+        print(f"saved data: {paths['data']}")
+        print(f"saved metadata: {paths['meta']}")
+        print(f"saved failures: {paths['failed']}")
         print(f"samples: {solution.value_samples.size}, seconds: {elapsed:.2f}")
 
 

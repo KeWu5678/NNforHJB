@@ -60,6 +60,10 @@ def test_paper_profile_returns_pdap_value_samples_and_save_artifacts(tmp_path) -
     assert solution.value_samples.size >= 1
     assert solution.failed_initial_states.shape[1] == 2
     assert paths["data"].name == "VDP_paper_grid_1x2_20260605.npz"
+    assert paths["run_dir"].name.startswith("VDP_20260605_")
+    assert paths["data"].parent == paths["run_dir"]
+    assert paths["meta"].parent == paths["run_dir"]
+    assert paths["failed"].parent == paths["run_dir"]
     loaded = ValueSamples.load_npz(paths["data"])
     assert loaded.x.shape[1] == 2
     assert loaded.v.ndim == 1

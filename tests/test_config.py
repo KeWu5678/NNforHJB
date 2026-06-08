@@ -6,7 +6,7 @@ import torch
 from hydra import compose, initialize
 
 import src.config.store  # noqa: F401  — registers `config_schema`
-from src.config import get_activation
+from src.config import get_activation, get_use_sphere
 from src.data import load_value_samples
 from src.models import build_model
 from src.PDAP import PDAP
@@ -20,7 +20,6 @@ def test_compose_defaults() -> None:
     assert cfg.model.activation == "relu"
     assert cfg.model.power == 1.0
     assert cfg.model.alpha == 1e-5
-    assert cfg.model.use_sphere is True
     assert cfg.training.num_iterations == 10
     assert cfg.training.max_ls_iter == 500
     assert cfg.training.ins_merge_tol == 1e-2
@@ -38,6 +37,24 @@ def test_model_groups() -> None:
     # finite_step config group = signed + finite_step
     assert fs.model.kind == "signed"
     assert fs.model.insertion == "finite_step"
+
+
+def test_curated_experiment_configs_compose() -> None:
+    with initialize(version_base=None, config_path="../conf"):
+        activation = compose(config_name="config", overrides=["+experiment=activationsearch_VDP"])
+        pendulum = compose(config_name="config", overrides=["+experiment=activationsearch_pendulum"])
+        penalty = compose(config_name="config", overrides=["+experiment=penaltypowers_VDP"])
+
+    assert activation.name == "activationsearch_VDP"
+    assert activation.model.insertion == "profile"
+
+    assert pendulum.name == "activationsearch_pendulum"
+    assert pendulum.model.insertion == "profile"
+    assert pendulum.data.path.endswith(".npz")
+
+    assert penalty.name == "penaltypowers_VDP"
+    assert penalty.model.insertion == "finite_step"
+    assert penalty.model.power == 2.0
 
 
 def test_config_builds_trainer_and_model() -> None:
@@ -75,9 +92,17 @@ def test_activation_resolver() -> None:
     assert callable(get_activation("matern52"))
 
 
-def test_use_sphere_is_explicit() -> None:
+def test_use_sphere_bundled_with_activation() -> None:
+    # use_sphere is co-located with the activation in the registry, not configured.
+    assert get_use_sphere("relu") is True
+    assert get_use_sphere("matern52") is False
+
+
+def test_use_sphere_derives_from_activation() -> None:
     with initialize(version_base=None, config_path="../conf"):
         default = compose(config_name="config", overrides=["env.verbose=false"])
-        override = compose(config_name="config", overrides=["model.use_sphere=false", "env.verbose=false"])
+        smooth = compose(config_name="config",
+                         overrides=["model.activation=matern52", "env.verbose=false"])
+    # default activation is relu (homogeneous -> sphere); matern52 is not
     assert PDAP(default)._use_sphere is True
-    assert PDAP(override)._use_sphere is False
+    assert PDAP(smooth)._use_sphere is False
