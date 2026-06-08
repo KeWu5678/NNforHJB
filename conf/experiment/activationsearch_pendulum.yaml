@@ -1,0 +1,19 @@
+# @package _global_
+# activationsearch_pendulum experiment: signed/profile PDAP on normalized
+# open-loop pendulum PMP value/gradient samples. The sphere geometry follows the
+# swept activation (each registry entry carries its own use_sphere — see
+# src/config/activations.py). This file pins the *fixed* settings; the swept axes
+# (activation / gamma / loss_weights / seed) are passed on the CLI via Hydra
+# multirun — see `make activationsearch_pendulum`.
+
+name: activationsearch_pendulum
+
+model:
+  kind: signed
+  insertion: profile
+  power: 1.0
+  alpha: 1e-5
+
+data:
+  path: Pendulum_20260607_746c672443544899b32dd47579708273/Pendulum_pmp_value_samples_256_20260607.npz
+  normalize: true

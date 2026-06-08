@@ -1,15 +1,17 @@
 # @package _global_
-# activationsearch experiment: signed/profile PDAP on normalized VDP data with
-# non-homogeneous activations (use_sphere=false). This file pins the *fixed*
+# activationsearch_VDP experiment: signed/profile PDAP on normalized VDP data.
+# The sphere geometry follows the swept activation (each registry entry carries
+# its own use_sphere — see src/config/activations.py). This file pins the *fixed*
 # settings; the swept axes (activation / gamma / loss_weights / seed) are passed
-# on the CLI via Hydra multirun — see `make activationsearch`.
+# on the CLI via Hydra multirun — see `make activationsearch_VDP`.
+
+name: activationsearch_VDP
 
 model:
   kind: signed
   insertion: profile
   power: 1.0
   alpha: 1e-5
-  use_sphere: false
 
 data:
   path: VDP_beta_0.1_grid_30x30.npy
