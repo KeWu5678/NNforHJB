@@ -10,7 +10,7 @@ the inner weights (w_i, b_i) frozen.
 This is an ``nn.Module`` parametrization: ``c, C, a, b0`` are parameters (in that
 order, so ``parameters()`` matches theta and the penalty masks), ``W, b`` are
 buffers (the fixed support).  It owns the composed forward, the prediction, and
-the feature maps (``jacobians`` = Jacobians of V, dV w.r.t. theta, by autodiff).
+the feature maps (``jacobians`` = Jacobians of V, dV w.r.t. theta).
 The SSN outer solve lives in the trainer (:mod:`src.PDAP.ssn_solve`): only ``c``
 is penalised; ``c`` and ``C`` are nonnegative; ``a, b0`` are free.
 """
@@ -137,25 +137,53 @@ class SemiconcaveModel(torch.nn.Module):
 
     # ------------------------------------------------------------------ #
     # Linear-in-theta interface for the trainer SSN solve (src.PDAP.ssn_solve).
-    # The feature maps are the Jacobians of (V, dV) w.r.t. theta, obtained by
-    # autodiffing the composed forward (constant in theta, so built once).
+    # The feature maps are the Jacobians of (V, dV) w.r.t. theta. They are built
+    # directly from the chain rule; full higher-order functional Jacobians
+    # materialize a large tape on pendulum-sized batches.
     # ------------------------------------------------------------------ #
     def jacobians(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """Feature maps (Phi_v (N,P), Phi_g (N*d,P)) of V, dV w.r.t. theta."""
         self._ensure_affine(x.shape[1])
-        theta = self._theta()
         x_det = x.detach()
+        N, d = x_det.shape
+        n = self.n_neurons
 
-        Phi_v = torch.autograd.functional.jacobian(
-            lambda th: self._value(th, x_det).reshape(-1), theta, vectorize=True,
+        if n > 0:
+            z = x_det @ self.W.T + self.b
+            z = z.detach().requires_grad_(True)
+            with torch.enable_grad():
+                S = self.activation(z) ** self.power
+                dS_dz = torch.autograd.grad(
+                    S, z, grad_outputs=torch.ones_like(S), create_graph=False,
+                )[0]
+            S = S.detach()
+            dS_dz = dS_dz.detach()
+            dS_dx = dS_dz.unsqueeze(2) * self.W.detach().unsqueeze(0)  # (N, n, d)
+            Phi_g_c = -dS_dx.permute(0, 2, 1).reshape(N * d, n)
+        else:
+            S = x_det.new_zeros(N, 0)
+            Phi_g_c = x_det.new_zeros(N * d, 0)
+
+        Phi_v = torch.cat(
+            [
+                -S,
+                0.5 * (x_det * x_det).sum(dim=1, keepdim=True),
+                -x_det,
+                -x_det.new_ones(N, 1),
+            ],
+            dim=1,
         )
 
-        def grad_value(th: torch.Tensor) -> torch.Tensor:
-            xr = x_det.requires_grad_(True)
-            V = self._value(th, xr)
-            return torch.autograd.grad(V.sum(), xr, create_graph=True)[0].reshape(-1)
-
-        Phi_g = torch.autograd.functional.jacobian(grad_value, theta, vectorize=True)
+        eye = torch.eye(d, dtype=x_det.dtype, device=x_det.device)
+        Phi_g = torch.cat(
+            [
+                Phi_g_c,
+                x_det.reshape(N * d, 1),
+                -eye.expand(N, d, d).reshape(N * d, d),
+                x_det.new_zeros(N * d, 1),
+            ],
+            dim=1,
+        )
         return Phi_v, Phi_g
 
     def penalty_masks(self) -> Tuple[torch.Tensor, torch.Tensor]:
