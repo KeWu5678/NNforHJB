@@ -78,6 +78,42 @@ def test_predict_matches_linear_features():
     assert torch.allclose(Phi_g @ theta, dVp.reshape(-1), atol=1e-10)
 
 
+def test_jacobians_match_finite_differences_without_functional_jacobian(monkeypatch):
+    d, N, n = 2, 10, 3
+    x = torch.randn(N, d, dtype=torch.float64)
+    W, b = _atoms(n, d, seed=11)
+    m = SemiconcaveModel(power=1.0, activation=torch.tanh, verbose=False)
+    m.set_atoms(W, b, torch.rand(n, dtype=torch.float64))
+    _set_structural(m, C=1.2, a=[0.15, -0.35], b0=0.4)
+
+    def fail(*args, **kwargs):
+        raise AssertionError("functional.jacobian materializes the large Phi_g tape")
+
+    def value_and_grad(theta):
+        x_req = x.detach().clone().requires_grad_(True)
+        V = m._value(theta, x_req)
+        dV = torch.autograd.grad(V.sum(), x_req, create_graph=False)[0]
+        return V.reshape(-1).detach(), dV.reshape(-1).detach()
+
+    monkeypatch.setattr(torch.autograd.functional, "jacobian", fail)
+    Phi_v, Phi_g = m.jacobians(x)
+
+    theta = _theta(m)
+    eps = 1e-6
+    fd_v = torch.zeros_like(Phi_v)
+    fd_g = torch.zeros_like(Phi_g)
+    for j in range(theta.numel()):
+        delta = torch.zeros_like(theta)
+        delta[j] = eps
+        V_plus, dV_plus = value_and_grad(theta + delta)
+        V_minus, dV_minus = value_and_grad(theta - delta)
+        fd_v[:, j] = (V_plus - V_minus) / (2 * eps)
+        fd_g[:, j] = (dV_plus - dV_minus) / (2 * eps)
+
+    assert torch.allclose(Phi_v, fd_v, atol=1e-6, rtol=1e-6)
+    assert torch.allclose(Phi_g, fd_g, atol=1e-6, rtol=1e-6)
+
+
 def test_augmented_hessian_matches_autograd():
     d, N, n = 2, 40, 4
     x = torch.randn(N, d, dtype=torch.float64)
