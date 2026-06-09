@@ -97,6 +97,7 @@ class PendulumValueSolution:
 
         stem = f"Pendulum_pmp_value_samples_{self.diagnostics.requested_trajectories}_{date}"
         data_path = self.value_samples.save_npz(run_dir / f"{stem}.npz")
+        curve_path = self.nonsmooth_curve.save_npz(run_dir / f"{stem}_nonsmooth_curve.npz")
         meta_path = run_dir / f"Pendulum_pmp_value_samples_meta_{date}.json"
         failed_path = run_dir / f"Pendulum_pmp_value_samples_failed_{date}.json"
 
@@ -106,13 +107,20 @@ class PendulumValueSolution:
             "nonsmooth_points": self.diagnostics.nonsmooth_points,
             "discarded_points": self.diagnostics.discarded_points,
             "retained_points": self.diagnostics.retained_points,
+            "nonsmooth_curve": str(curve_path),
         }
         meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
         failed_path.write_text(
             json.dumps(self.diagnostics.failed_trajectories, indent=2),
             encoding="utf-8",
         )
-        return {"run_dir": run_dir, "data": data_path, "meta": meta_path, "failed": failed_path}
+        return {
+            "run_dir": run_dir,
+            "data": data_path,
+            "curve": curve_path,
+            "meta": meta_path,
+            "failed": failed_path,
+        }
 
 
 class PendulumPmpSolver:
