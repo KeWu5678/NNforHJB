@@ -9,8 +9,6 @@ import sys
 import time
 from pathlib import Path
 
-import numpy as np
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -87,6 +85,7 @@ def main() -> None:
         "source_paper": "https://arxiv.org/pdf/2312.17467",
         "description": "Backward-PMP infinite-horizon pendulum ValueSamples.",
         "data_path": str(paths["data"]),
+        "curve_path": str(paths["curve"]),
         "failed_path": str(paths["failed"]),
         "run_dir": str(paths["run_dir"]),
         "elapsed_seconds": elapsed,
