@@ -2,7 +2,6 @@ import numpy as np
 
 from src.OpenLoop.pendulum.nonsmooth import (
     NonsmoothCurve,
-    compute_nonsmooth_curve,
     restrict_trajectory_to_curve,
 )
 from src.OpenLoop.pendulum.problem import PendulumSwingUpProblem
@@ -190,34 +189,74 @@ def test_value_samples_are_pdap_compatible_and_npz_roundtrip(tmp_path) -> None:
     assert np.allclose(loaded.dv, samples.dv)
 
 
-def test_shifted_equal_value_contour_finds_periodic_intersections() -> None:
-    trajectories = (
-        _trajectory([[-np.pi, 0.0], [0.0, 0.0]], [0.0, 1.0], 0),
-        _trajectory([[np.pi, 0.0], [2.0 * np.pi, 0.0]], [0.0, 1.0], 1),
-        _trajectory([[3.0 * np.pi, 0.0], [4.0 * np.pi, 0.0]], [0.0, 1.0], 2),
+def test_nonsmooth_curve_exposes_basin_polygon() -> None:
+    curve = NonsmoothCurve(
+        points=np.array(
+            [
+                [-np.pi, 0.0],
+                [-np.pi, 1.0],
+                [np.pi, 0.0],
+                [np.pi, 1.0],
+                [3.0 * np.pi, 0.0],
+                [3.0 * np.pi, 1.0],
+                [5.0 * np.pi, 0.0],
+                [5.0 * np.pi, 1.0],
+            ]
+        ),
+        value_levels=np.array([26.0, 26.25, 26.0, 26.25, 26.0, 26.25, 26.0, 26.25]),
+        basin=np.array(
+            [
+                [-1.0, -1.0],
+                [1.0, -1.0],
+                [1.0, 1.0],
+                [-1.0, 1.0],
+                [-1.0, -1.0],
+            ]
+        ),
     )
 
-    curve = compute_nonsmooth_curve(trajectories, value_delta=0.5, value_max=0.5)
-
-    assert curve.points.shape[0] >= 1
-    assert np.allclose(curve.value_levels, 0.5)
+    assert curve.basin_polygon() is not None
+    assert curve.as_linestring().geom_type == "MultiLineString"
 
 
-def test_branch_restriction_discards_points_after_first_curve_crossing() -> None:
+def test_nonsmooth_curve_npz_roundtrip_preserves_basin(tmp_path) -> None:
+    curve = NonsmoothCurve(
+        points=np.array([[0.0, 1.0], [2.0, 3.0]]),
+        value_levels=np.array([26.0, 26.25]),
+        basin=np.array([[-1.0, -1.0], [1.0, -1.0], [0.0, 1.0], [-1.0, -1.0]]),
+    )
+
+    loaded = NonsmoothCurve.load_npz(curve.save_npz(tmp_path / "curve.npz"))
+
+    assert np.allclose(loaded.points, curve.points)
+    assert np.allclose(loaded.value_levels, curve.value_levels)
+    assert np.allclose(loaded.basin, curve.basin)
+
+
+def test_branch_restriction_discards_points_after_first_basin_exit() -> None:
     trajectory = _trajectory(
-        [[0.0, -1.0], [0.0, -0.2], [0.0, 0.2], [0.0, 1.0]],
+        [[0.0, 0.0], [0.0, 0.5], [0.0, 1.5], [0.0, 2.0]],
         [0.0, 1.0, 2.0, 3.0],
         0,
     )
     curve = NonsmoothCurve(
         points=np.array([[-1.0, 0.0], [1.0, 0.0]]),
         value_levels=np.array([1.0, 1.0]),
+        basin=np.array(
+            [
+                [-1.0, -1.0],
+                [1.0, -1.0],
+                [1.0, 1.0],
+                [-1.0, 1.0],
+                [-1.0, -1.0],
+            ]
+        ),
     )
 
     restricted, discarded = restrict_trajectory_to_curve(trajectory, curve)
 
-    assert discarded > 0
-    assert restricted.state.shape[0] < trajectory.state.shape[0]
+    assert discarded == 2
+    assert np.allclose(restricted.state, trajectory.state[:2])
 
 
 def test_solver_emits_value_samples_and_diagnostics() -> None:
