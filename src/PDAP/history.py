@@ -47,6 +47,7 @@ class History:
     err_h1_val: List[float] = field(default_factory=list)
     inner_weights: List[Dict[str, torch.Tensor]] = field(default_factory=list)
     outer_weights: List[torch.Tensor] = field(default_factory=list)
+    model_states: List[Dict[str, torch.Tensor]] = field(default_factory=list)
     best_iteration: int = 0
     best_train_loss: float = float("inf")
     final_neurons: int = 0
@@ -65,6 +66,9 @@ class History:
         W, b, c = model.get_atoms()
         self.inner_weights.append({"weight": W, "bias": b})
         self.outer_weights.append(c.reshape(1, -1))
+        self.model_states.append(
+            {name: tensor.detach().clone() for name, tensor in model.state_dict().items()}
+        )
         i = len(self.train_loss) - 1
         if tl < self.best_train_loss:
             self.best_train_loss = tl
