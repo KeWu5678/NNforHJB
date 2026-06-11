@@ -1,6 +1,6 @@
 # ---------------------------------------------------------------------------
 # MLflow tracking server: one stoppable EC2 instance, SQLite backend on EBS,
-# Run Artifacts proxied to S3 via the instance role, reached only over SSM.
+# reached only over SSM.
 # See docs/adr/0001-self-hosted-mlflow-on-ec2.md.
 # ---------------------------------------------------------------------------
 
@@ -38,50 +38,7 @@ data "aws_ssm_parameter" "al2023" {
 }
 
 # ---------------------------------------------------------------------------
-# Artifact store
-# ---------------------------------------------------------------------------
-
-resource "random_id" "bucket_suffix" {
-  byte_length = 4
-}
-
-resource "aws_s3_bucket" "artifacts" {
-  bucket = "${var.artifact_bucket_prefix}-${random_id.bucket_suffix.hex}"
-
-  # Safe here: per ADR-0001 the source of truth is local, not S3, so this bucket
-  # is disposable. force_destroy lets `terraform destroy` empty it (including all
-  # object versions) instead of failing on a non-empty versioned bucket.
-  force_destroy = true
-}
-
-resource "aws_s3_bucket_public_access_block" "artifacts" {
-  bucket                  = aws_s3_bucket.artifacts.id
-  block_public_acls       = true
-  block_public_policy     = true
-  ignore_public_acls      = true
-  restrict_public_buckets = true
-}
-
-resource "aws_s3_bucket_versioning" "artifacts" {
-  bucket = aws_s3_bucket.artifacts.id
-
-  versioning_configuration {
-    status = "Enabled"
-  }
-}
-
-resource "aws_s3_bucket_server_side_encryption_configuration" "artifacts" {
-  bucket = aws_s3_bucket.artifacts.id
-
-  rule {
-    apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
-    }
-  }
-}
-
-# ---------------------------------------------------------------------------
-# Instance role: SSM access + scoped S3 access to the artifact bucket only
+# Instance role: SSM access only
 # ---------------------------------------------------------------------------
 
 data "aws_iam_policy_document" "assume" {
@@ -106,33 +63,13 @@ resource "aws_iam_role_policy_attachment" "ssm" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
-data "aws_iam_policy_document" "s3" {
-  statement {
-    sid       = "ListArtifactBucket"
-    actions   = ["s3:ListBucket", "s3:GetBucketLocation"]
-    resources = [aws_s3_bucket.artifacts.arn]
-  }
-
-  statement {
-    sid       = "ReadWriteArtifacts"
-    actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
-    resources = ["${aws_s3_bucket.artifacts.arn}/*"]
-  }
-}
-
-resource "aws_iam_role_policy" "s3" {
-  name   = "${var.project}-mlflow-s3"
-  role   = aws_iam_role.mlflow.id
-  policy = data.aws_iam_policy_document.s3.json
-}
-
 resource "aws_iam_instance_profile" "mlflow" {
   name = "${var.project}-mlflow"
   role = aws_iam_role.mlflow.name
 }
 
 # ---------------------------------------------------------------------------
-# Security group: no inbound (SSM only), all outbound (SSM, S3, pip installs)
+# Security group: no inbound (SSM only), all outbound (SSM, package installs)
 # ---------------------------------------------------------------------------
 
 resource "aws_security_group" "mlflow" {
@@ -141,7 +78,7 @@ resource "aws_security_group" "mlflow" {
   vpc_id      = local.vpc_id
 
   egress {
-    description = "All outbound (SSM endpoints, S3, package installs)"
+    description = "All outbound (SSM endpoints, package installs)"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
@@ -161,9 +98,8 @@ resource "aws_instance" "mlflow" {
   vpc_security_group_ids = [aws_security_group.mlflow.id]
 
   user_data = templatefile("${path.module}/user_data.sh.tftpl", {
-    artifact_bucket = aws_s3_bucket.artifacts.id
-    mlflow_port     = var.mlflow_port
-    mlflow_version  = var.mlflow_version
+    mlflow_port    = var.mlflow_port
+    mlflow_version = var.mlflow_version
   })
 
   # Do NOT replace the instance when the bootstrap script changes: replacement

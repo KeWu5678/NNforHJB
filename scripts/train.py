@@ -17,7 +17,10 @@ import argparse
 import logging
 import pickle
 import random
+import re
+import secrets
 import sys
+from datetime import datetime
 from pathlib import Path
 
 # Compatibility shim: Python 3.14 added ArgumentParser._check_help, which rejects
@@ -25,13 +28,13 @@ from pathlib import Path
 # pure help-lint added in 3.14; neutralizing it restores pre-3.14 behavior so
 # @hydra.main can build its CLI parser. Remove once Hydra ships a 3.14-safe release.
 if hasattr(argparse.ArgumentParser, "_check_help"):
-    argparse.ArgumentParser._check_help = lambda self, action: None
+    argparse.ArgumentParser._check_help = lambda _self, _action: None
 
 import hydra
 import numpy as np
 import torch
 from hydra.core.hydra_config import HydraConfig
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig, ListConfig, OmegaConf
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
@@ -47,28 +50,49 @@ logger = logging.getLogger(__name__)
 
 
 def _slug(value: object) -> str:
-    return str(value).replace(".", "p").replace("-", "m").replace(" ", "")
+    slug = re.sub(r"[^A-Za-z0-9]+", "", str(value).lower())
+    return slug or "run"
 
 
-def run_id_from_config(cfg: DictConfig) -> str:
-    weights = tuple(float(value) for value in cfg.model.loss_weights)
-    if weights == (1.0, 1.0):
-        loss = "h1"
-    elif weights == (1.0, 0.0):
-        loss = "l2"
-    else:
-        loss = "loss" + "_".join(_slug(value) for value in weights)
-    return "_".join(
-        [
-            str(cfg.model.kind),
-            str(cfg.model.insertion),
-            str(cfg.model.activation),
-            f"power{_slug(cfg.model.power)}",
-            f"gamma{_slug(cfg.model.gamma)}",
-            loss,
-            f"seed{cfg.env.seed}",
-        ]
-    )
+def _to_container(value):
+    if isinstance(value, DictConfig | ListConfig):
+        return OmegaConf.to_container(value, resolve=True)
+    return value
+
+
+def _select(hydra_cfg, path: str):
+    return _to_container(OmegaConf.select(hydra_cfg, path))
+
+
+def hydra_metadata(hydra_cfg) -> dict:
+    return {
+        "output_dir": str(_select(hydra_cfg, "runtime.output_dir")),
+        "job": {
+            "name": _select(hydra_cfg, "job.name"),
+            "id": _select(hydra_cfg, "job.id"),
+            "num": _select(hydra_cfg, "job.num"),
+        },
+        "runtime": {
+            "choices": _select(hydra_cfg, "runtime.choices") or {},
+        },
+        "overrides": {
+            "task": _select(hydra_cfg, "overrides.task") or [],
+        },
+    }
+
+
+def run_id_from_config(
+    cfg: DictConfig,
+    *,
+    hydra_cfg=None,
+    today: str | None = None,
+    suffix: str | None = None,
+) -> str:
+    choices = _select(hydra_cfg, "runtime.choices") if hydra_cfg is not None else {}
+    data_choice = (choices or {}).get("data") or Path(str(cfg.data.path)).stem
+    run_date = today or datetime.now().strftime("%Y%m%d")
+    run_suffix = suffix or secrets.token_hex(2)
+    return "_".join([_slug(cfg.name), _slug(data_choice), run_date, run_suffix])
 
 
 def set_seed(seed: int) -> None:
@@ -83,7 +107,8 @@ def main(cfg: DictConfig) -> None:
     # workers (joblib) don't interleave their progress tables on the shared
     # console. `env.verbose` still controls console streaming; `env.log_file`
     # overrides the per-run default when set.
-    run_dir = Path(HydraConfig.get().runtime.output_dir)
+    hydra_cfg = HydraConfig.get()
+    run_dir = Path(hydra_cfg.runtime.output_dir)
     log_file = cfg.env.log_file or (run_dir / "run.log")
     configure_logging(verbose=cfg.env.verbose, level=cfg.env.log_level, log_file=log_file)
     set_seed(cfg.env.seed)
@@ -93,8 +118,9 @@ def main(cfg: DictConfig) -> None:
     run = ExperimentRun(
         output_dir=run_dir,
         name=cfg.name,
-        run_id=run_id_from_config(cfg),
+        run_id=run_id_from_config(cfg, hydra_cfg=hydra_cfg),
         config=OmegaConf.to_container(cfg, resolve=True),
+        hydra=hydra_metadata(hydra_cfg),
     )
 
     # Data preprocessing lives in the script: load, normalize, split.  The model

@@ -3,11 +3,6 @@ output "instance_id" {
   value       = aws_instance.mlflow.id
 }
 
-output "artifact_bucket" {
-  description = "S3 bucket holding MLflow Run Artifacts."
-  value       = aws_s3_bucket.artifacts.id
-}
-
 output "mlflow_port" {
   description = "Port the server listens on (localhost on the instance)."
   value       = var.mlflow_port

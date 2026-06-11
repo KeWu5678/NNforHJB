@@ -10,9 +10,9 @@ dnf install -y python3 python3-pip
 python3 -m venv /opt/mlflow/venv
 /opt/mlflow/venv/bin/pip install --upgrade pip
 %{ if mlflow_version != "" ~}
-/opt/mlflow/venv/bin/pip install "mlflow==${mlflow_version}" boto3
+/opt/mlflow/venv/bin/pip install "mlflow==${mlflow_version}"
 %{ else ~}
-/opt/mlflow/venv/bin/pip install mlflow boto3
+/opt/mlflow/venv/bin/pip install mlflow
 %{ endif ~}
 
 cat > /etc/systemd/system/mlflow.service <<'UNIT'
@@ -23,7 +23,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/opt/mlflow/venv/bin/mlflow server --host 127.0.0.1 --port ${mlflow_port} --backend-store-uri sqlite:////opt/mlflow/mlflow.db --serve-artifacts --artifacts-destination s3://${artifact_bucket}
+ExecStart=/opt/mlflow/venv/bin/mlflow server --host 127.0.0.1 --port ${mlflow_port} --backend-store-uri sqlite:////opt/mlflow/mlflow.db
 Restart=always
 RestartSec=5
 User=root

@@ -1,4 +1,6 @@
 PY := .venv/bin/python
+TF_DIR ?= deploy/terraform
+MLFLOW_RECORDS ?= rawdata/logs/multirun
 
 # This root Makefile is the project's experiment entrypoint.
 #
@@ -20,13 +22,49 @@ VERBOSE ?= false
 # recipes) so the workers don't oversubscribe the cores. Override per-invocation,
 # e.g. `make activationsearch_pendulum JOBS=10`; JOBS=1 is effectively serial.
 JOBS ?= 8
-.PHONY: help activationsearch_VDP activationsearch_pendulum penaltypowers_VDP
+.PHONY: help activationsearch_VDP activationsearch_pendulum penaltypowers_VDP check-terraform check-aws check-session-manager mlflow-deploy mlflow-start mlflow-stop mlflow-tunnel mlflow-backfill mlflow-backfill-latest mlflow-backfill-dry-run mlflow-backfill-latest-dry-run
 
 help:  ## list targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 	  awk 'BEGIN {FS = ":.*?## "} {printf "  %-20s %s\n", $$1, $$2}'
 	@printf "\n  %-20s %s\n" "VERBOSE=true" "also stream PDAP tables to console (always in per-run run.log)"
 	@printf "  %-20s %s\n" "JOBS=N" "parallel sweep workers (default 8)"
+	@printf "  %-20s %s\n" "MLFLOW_RECORDS=PATH" "JSON record file/dir for backfill (default rawdata/logs/multirun)"
+	@printf "  %-20s %s\n" "MLFLOW_TRACKING_URI=URL" "set in your shell to enable MLflow logging/backfill"
+
+check-terraform:
+	@command -v terraform >/dev/null 2>&1 || { echo "terraform is required. On macOS: brew tap hashicorp/tap && brew install hashicorp/tap/terraform"; exit 1; }
+
+check-aws:
+	@command -v aws >/dev/null 2>&1 || { echo "aws CLI v2 is required. On macOS: brew install awscli"; exit 1; }
+
+check-session-manager:
+	@command -v session-manager-plugin >/dev/null 2>&1 || { echo "AWS Session Manager plugin is required for SSM tunnels. On macOS: brew install --cask session-manager-plugin"; exit 1; }
+
+mlflow-deploy: check-terraform  ## provision/update EC2 MLflow tracking server with Terraform
+	terraform -chdir=$(TF_DIR) init
+	terraform -chdir=$(TF_DIR) apply
+
+mlflow-start: check-terraform check-aws  ## start the MLflow EC2 instance; systemd starts the server on boot
+	aws ec2 start-instances --instance-ids "$$(terraform -chdir=$(TF_DIR) output -raw instance_id)"
+
+mlflow-stop: check-terraform check-aws  ## stop the MLflow EC2 instance to avoid compute charges
+	aws ec2 stop-instances --instance-ids "$$(terraform -chdir=$(TF_DIR) output -raw instance_id)"
+
+mlflow-tunnel: check-terraform check-aws check-session-manager  ## open SSM tunnel; keep this terminal running
+	eval "$$(terraform -chdir=$(TF_DIR) output -raw ssm_port_forward_command)"
+
+mlflow-backfill:  ## upload existing local Run Record JSON files to MLflow
+	$(PY) scripts/upload_run_records_to_mlflow.py $(MLFLOW_RECORDS)
+
+mlflow-backfill-latest:  ## upload only the newest local Run Record JSON files to MLflow
+	$(PY) scripts/upload_run_records_to_mlflow.py $(MLFLOW_RECORDS) --latest
+
+mlflow-backfill-dry-run:  ## list local Run Record JSON files that would be uploaded
+	$(PY) scripts/upload_run_records_to_mlflow.py $(MLFLOW_RECORDS) --dry-run
+
+mlflow-backfill-latest-dry-run:  ## list newest local Run Record JSON files that would be uploaded
+	$(PY) scripts/upload_run_records_to_mlflow.py $(MLFLOW_RECORDS) --latest --dry-run
 
 activationsearch_VDP:  ## reproduce: two Hydra multirun sweeps (signed/profile + semiconcave/finite_step, VDP) + analysis
 	# Sweep 1: signed / profile

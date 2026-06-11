@@ -16,12 +16,6 @@ variable "instance_type" {
   default     = "t3.small"
 }
 
-variable "artifact_bucket_prefix" {
-  description = "Prefix for the S3 artifact bucket; a random suffix is appended for global uniqueness."
-  type        = string
-  default     = "nnforhjb-mlflow"
-}
-
 variable "root_volume_gb" {
   description = "Root EBS volume size in GB. Holds the SQLite backend store, so size for run-metadata growth."
   type        = number
