@@ -19,7 +19,7 @@ variable "instance_type" {
 variable "root_volume_gb" {
   description = "Root EBS volume size in GB. Holds the SQLite backend store, so size for run-metadata growth."
   type        = number
-  default     = 20
+  default     = 10
 }
 
 variable "mlflow_port" {
