@@ -107,9 +107,13 @@ def split_value_samples(
 ) -> tuple[TensorSamples, TensorSamples]:
     """Split value samples into (train, valid) float64 tensor tuples (x, v, dv).
 
-    The first floor(N * train_fraction) samples train, the rest validate.
-    ValueSamples are already float64 with v shaped (N, 1) (see _as_value_samples),
-    so the tensors inherit that contract — no per-tensor dtype/reshape needed.
+    A **random** floor(N * train_fraction) / remainder split. Samples are stored
+    trajectory-by-trajectory, so a sequential slice would hand the whole validation
+    set to the last few trajectories — a spatially clustered wedge, not a
+    representative hold-out. The permutation draws from the global NumPy RNG, which
+    the run script seeds (``env.seed``) before calling, so the split is
+    reproducible per run. ValueSamples are already float64 with v shaped (N, 1)
+    (see _as_value_samples), so the tensors inherit that contract.
     """
     n = samples["x"].shape[0]
     split = int(n * train_fraction)
@@ -118,5 +122,6 @@ def split_value_samples(
             f"train_fraction={train_fraction} gives a {split}/{n - split} split; "
             "both sides must be non-empty"
         )
-    take = lambda sl: tuple(torch.tensor(samples[k][sl]) for k in ("x", "v", "dv"))
-    return take(slice(None, split)), take(slice(split, None))
+    perm = np.random.permutation(n)
+    take = lambda idx: tuple(torch.tensor(samples[k][idx]) for k in ("x", "v", "dv"))
+    return take(perm[:split]), take(perm[split:])

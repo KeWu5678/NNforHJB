@@ -41,7 +41,9 @@ sys.path.insert(0, str(REPO_ROOT))
 
 import src.config.store  # noqa: F401  — registers `config_schema` with Hydra's ConfigStore
 from src.data import load_value_samples, normalize_value_samples, split_value_samples
+from src.eval import distance_binned_error, region_split_errors
 from src.models import build_model
+from src.paths import DATA_DIR
 from src.PDAP import PDAP
 from src.experiment_logging import ExperimentRun
 from src.logging_config import configure_logging
@@ -101,6 +103,41 @@ def set_seed(seed: int) -> None:
     torch.manual_seed(seed)
 
 
+def region_split_metrics(cfg, model, data, n_total: int) -> dict:
+    """Near/far errors over the FULL dataset, split by distance to the switching set.
+
+    Evaluated on *all* samples, not the validation tail: the model is fixed here,
+    so we are characterizing where it errs across the state space, which is both
+    spatially representative and independent of the train/val split. The lowest
+    ``near_percentile`` percent of samples by distance form the *near* region.
+
+    Scored on the **live, as-fit** ``model`` (final iteration), not a reconstructed
+    best-iteration one: reconstruction via ``set_atoms`` loses the semiconcave
+    envelope (``C``/affine) that ``History`` never snapshots (issue #19), so only
+    the live model is complete for both model kinds.
+    """
+    if not cfg.eval.distance_cache:
+        raise ValueError("eval.kind=region_split requires eval.distance_cache")
+    with np.load(DATA_DIR / cfg.eval.distance_cache) as cache:
+        distance = np.asarray(cache["distance"], dtype=np.float64)
+    if distance.shape[0] != n_total:
+        raise ValueError(
+            f"distance cache has {distance.shape[0]} rows, dataset has {n_total}; "
+            "the cache is not aligned to this dataset"
+        )
+
+    threshold = float(np.percentile(distance, cfg.eval.near_percentile))
+    near_mask = torch.from_numpy(distance <= threshold)
+
+    x = torch.as_tensor(data["x"], dtype=torch.float64)
+    v = torch.as_tensor(data["v"], dtype=torch.float64)
+    dv = torch.as_tensor(data["dv"], dtype=torch.float64)
+    v_pred, dv_pred = model.predict_tensors(x)
+    metrics = region_split_errors(v_pred, dv_pred, v, dv, near_mask)
+    metrics.update(distance_binned_error(v_pred, dv_pred, v, dv, torch.from_numpy(distance)))
+    return metrics
+
+
 @hydra.main(version_base=None, config_path="../conf", config_name="config")
 def main(cfg: DictConfig) -> None:
     # Every run logs to its own file in the Hydra output dir, so parallel sweep
@@ -155,6 +192,19 @@ def main(cfg: DictConfig) -> None:
         metrics["rel_grad_val"],
         metrics["rel_h1_val"],
     )
+
+    # Pluggable post-fit evaluation (conf/eval). The default `global` adds nothing;
+    # `region_split` (pendulum, via conf/data/pendulum.yaml) reports val errors
+    # split by distance to the switching set, merged into the run record so the
+    # analysis layer reads them like any other metric.
+    if cfg.eval.kind == "region_split":
+        region = region_split_metrics(cfg, model, data, data["x"].shape[0])
+        metrics.update(region)
+        logger.info(
+            "region split | near H1 %.3e (n=%d) | far H1 %.3e (n=%d)",
+            region["near_h1"], int(region["near_count"]),
+            region["far_h1"], int(region["far_count"]),
+        )
 
     artifact = run_dir / f"result_{run.run_id}.pkl"
     with artifact.open("wb") as file:

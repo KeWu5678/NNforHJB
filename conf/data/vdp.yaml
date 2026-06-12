@@ -1,3 +1,8 @@
-# Data source: legacy Van der Pol value/gradient grid, resolved relative to DATA_DIR.
-# The loader also accepts newer OpenLoop .npz files with x, v, and dv arrays.
-path: VDP_beta_0.1_grid_30x30.npy
+# @package _global_
+# Legacy Van der Pol value/gradient grid. Smooth value function, so it keeps the
+# global eval (no switching set to split on). Authored at _global_ package to match
+# the data-selects-its-own-eval pattern (see conf/data/pendulum.yaml).
+defaults:
+  - /eval: global
+data:
+  path: VDP_beta_0.1_grid_30x30.npy

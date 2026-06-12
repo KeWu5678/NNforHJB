@@ -9,7 +9,9 @@
 defaults:
   - config_schema      # typed base (src/config/store.py) — validates everything below
   - model: signed      # conf/model/<name>.yaml — THE MODEL REGISTRY
-  - data: vdp          # conf/data/<name>.yaml   — the data source
+  - data: vdp          # conf/data/<name>.yaml   — the data source; each dataset selects
+                       #   its own post-fit eval (conf/eval/) via its defaults list, so
+                       #   eval is NOT listed here (would conflict). Schema default = global.
   - _self_
 
 name: run

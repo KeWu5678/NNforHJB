@@ -1,2 +1,9 @@
-# Data source: open-loop pendulum PMP value/gradient samples (256 pts), .npz with x, v, dv.
-path: Pendulum_20260607_746c672443544899b32dd47579708273/Pendulum_pmp_value_samples_256_20260607.npz
+# @package _global_
+# This dataset selects its own post-fit eval: the pendulum value function is
+# nonsmooth across the swing-up switching set, so it opts into region_split (VDP
+# is smooth and keeps the global default). Authored at _global_ package so the
+# defaults entry targets the top-level eval group, not data.eval.
+defaults:
+  - /eval: region_split
+data:
+  path: Pendulum_20260610_0849d5863f0c4b25ba5809e8937b0d64/Pendulum_pmp_value_samples_256_20260610.npz

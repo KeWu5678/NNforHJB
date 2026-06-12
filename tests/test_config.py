@@ -41,18 +41,17 @@ def test_model_groups() -> None:
 
 def test_curated_experiment_configs_compose() -> None:
     with initialize(version_base=None, config_path="../conf"):
-        activation = compose(config_name="config", overrides=["+experiment=activationsearch_VDP"])
-        pendulum = compose(config_name="config", overrides=["+experiment=activationsearch_pendulum"])
-        penalty = compose(config_name="config", overrides=["+experiment=penaltypowers_VDP"])
+        activation = compose(config_name="config", overrides=["+experiment=activationsearch"])
+        region = compose(config_name="config", overrides=["+experiment=region_split_pendulum"])
+        penalty = compose(config_name="config", overrides=["+experiment=penaltypowers"])
 
-    assert activation.name == "activationsearch_VDP"
-    assert activation.model.insertion == "profile"
+    assert activation.name == "activationsearch"
+    assert activation.model.power == 1.0
 
-    assert pendulum.name == "activationsearch_pendulum"
-    assert pendulum.model.insertion == "profile"
-    assert pendulum.data.path.endswith(".npz")
+    assert region.name == "region_split_pendulum"
+    assert region.model.power == 1.0
 
-    assert penalty.name == "penaltypowers_VDP"
+    assert penalty.name == "penaltypowers"
     assert penalty.model.insertion == "finite_step"
     assert penalty.model.power == 2.0
 
