@@ -1,82 +1,141 @@
-# MLflow deployment
+# MLflow Deployment
 
-Self-hosted MLflow tracking server on AWS providing a **central comparison
-dashboard** (params, metrics, tags). Full run data — the local JSON Run Records
-and `result_<point>.pkl` curves/weights — stays on the training machine; S3
-holds no result data today. The design and its trade-offs are recorded in
-[`docs/adr/0001-self-hosted-mlflow-on-ec2.md`](../docs/adr/0001-self-hosted-mlflow-on-ec2.md).
+Self-hosted MLflow tracking server on AWS for a central comparison dashboard.
+Terraform provisions the infrastructure; EC2 `user_data` installs MLflow and
+runs it under systemd. The root `Makefile` is the normal operator interface.
 
 ```
-your machine ──SSM tunnel──> EC2 (mlflow server, 127.0.0.1:5000)
-                               ├─ backend store: sqlite on EBS
-                               └─ Run Artifacts: s3://<bucket>  (via instance role)
-client config: MLFLOW_TRACKING_URI=http://localhost:5000   (nothing else)
+your machine --SSM tunnel--> EC2 (mlflow server, 127.0.0.1:5000)
+                              └─ backend store: sqlite on EBS
+client config: MLFLOW_TRACKING_URI=http://127.0.0.1:5000
 ```
 
-No inbound ports are opened: the server binds to localhost on the instance and
-is reached only through an AWS SSM port-forwarding session. Artifacts are
-**proxied** — the server writes to S3 using its IAM instance role, so no AWS
-credentials ever live on a logging machine.
+The application currently logs params, scalar metrics, tags, and local artifact
+paths. It does not upload `result_<run_id>.pkl` or JSON records as MLflow
+artifacts. The Terraform module does not create an S3 artifact bucket in v1.
+
+See:
+
+- [`docs/adr/0001-self-hosted-mlflow-on-ec2.md`](../docs/adr/0001-self-hosted-mlflow-on-ec2.md)
+- [`docs/adr/0002-mlflow-as-run-record-backend.md`](../docs/adr/0002-mlflow-as-run-record-backend.md)
 
 ## Prerequisites
 
-- Terraform `>= 1.5` and the AWS CLI v2 (with the Session Manager plugin).
-- AWS credentials with permission to create S3, IAM, EC2, and SSM resources.
+- Terraform `>= 1.5`
+- AWS CLI v2 with the Session Manager plugin
+- AWS credentials with permission to manage EC2, IAM, SSM, and related Terraform
+  resources under `deploy/terraform`
 
-## Provision
+On macOS:
 
 ```bash
-cd deploy/terraform
-terraform init
-terraform apply          # review the plan, then confirm
+brew tap hashicorp/tap
+brew install hashicorp/tap/terraform
+brew install awscli
+brew install --cask session-manager-plugin
 ```
 
-Override defaults as needed, e.g.:
+Use a real deploy identity, not long-lived access keys committed to repo config.
+Preferred setup is AWS IAM Identity Center/SSO or an IAM role that your local AWS
+profile assumes. The deploy identity needs permission to read VPC/subnet/AMI
+metadata, create the EC2 instance profile/role, pass that role to EC2, and
+start/stop the instance.
+
+Before deploying, verify that the active profile is the intended deploy identity:
 
 ```bash
-terraform apply -var region=eu-west-1 -var instance_type=t3.micro
+aws sts get-caller-identity
 ```
 
-Key outputs:
+If this returns a low-permission IAM user and Terraform fails with
+`UnauthorizedOperation`, fix the AWS-side role/profile permissions first, then
+rerun `make mlflow-deploy`.
 
-- `instance_id` — the SSM target.
-- `artifact_bucket` — the S3 bucket for Run Artifacts.
-- `ssm_port_forward_command` — a ready-to-run tunnel command.
+## Provision Or Update
 
-## Connect
-
-Open the tunnel (leave it running in its own terminal):
+From the repository root:
 
 ```bash
-eval "$(terraform output -raw ssm_port_forward_command)"
+make mlflow-deploy
 ```
 
-Then, in your training environment:
+This runs `terraform init` and `terraform apply` in `deploy/terraform`.
+
+`user_data` runs only when an instance is first created. If you already deployed
+an older MLflow instance and only change `user_data.sh.tftpl`, `terraform apply`
+will not rewrite the running systemd service on that instance. Recreate the
+instance intentionally, or update `/etc/systemd/system/mlflow.service` on the box
+and restart `mlflow.service`.
+
+## Start, Connect, Stop
+
+Start the EC2 instance:
 
 ```bash
-export MLFLOW_TRACKING_URI=http://localhost:5000
-# open the UI at the same URL in a browser
+make mlflow-start
 ```
 
-> **Note:** the MLflow Run Record backend is **not implemented yet**. Today
-> `src/experiment_logging.py` always writes local JSON; setting
-> `MLFLOW_TRACKING_URI` has no effect until the adapter lands. The planned
-> behavior (unset → local JSON, set → MLflow) is described in
-> [`docs/adr/0002-mlflow-as-run-record-backend.md`](../docs/adr/0002-mlflow-as-run-record-backend.md).
-
-## Cost control
-
-Stop the instance when idle to avoid compute charges (EBS and S3 persist):
+Open the SSM tunnel in a dedicated terminal and leave it running:
 
 ```bash
-aws ec2 stop-instances  --instance-ids "$(terraform -chdir=deploy/terraform output -raw instance_id)"
-aws ec2 start-instances --instance-ids "$(terraform -chdir=deploy/terraform output -raw instance_id)"
+make mlflow-tunnel
+```
+
+Then set the tracking URI in the shell that runs experiments or backfills:
+
+```bash
+export MLFLOW_TRACKING_URI=http://127.0.0.1:5000
+```
+
+Open the same URL in a browser for the MLflow UI.
+
+Stop the instance when idle:
+
+```bash
+make mlflow-stop
+```
+
+Stopping avoids EC2 compute charges while preserving the SQLite backend DB on
+the EBS root volume. Destroying/replacing the instance loses that DB unless it
+has been backed up; local JSON Run Records can be replayed with the backfill
+script.
+
+## Backfill Existing Records
+
+Upload existing local Run Records without rerunning training. Backfill does not
+provision infrastructure by itself; it only needs `MLFLOW_TRACKING_URI` to point
+at a reachable tracking server. If the EC2 instance already exists, start it and
+open the tunnel. Run `make mlflow-deploy` only when the infrastructure has not
+been created yet.
+
+```bash
+export MLFLOW_TRACKING_URI=http://127.0.0.1:5000
+make mlflow-backfill
+```
+
+For a sweep directory, upload only the newest immediate Hydra job directory:
+
+```bash
+make mlflow-backfill-latest MLFLOW_RECORDS=rawdata/logs/multirun/activationsearch
+```
+
+Limit the upload:
+
+```bash
+make mlflow-backfill MLFLOW_RECORDS=rawdata/logs/multirun/activationsearch
+make mlflow-backfill MLFLOW_RECORDS=rawdata/logs/multirun/activationsearch/1069
+```
+
+Preview first:
+
+```bash
+make mlflow-backfill-dry-run
+make mlflow-backfill-latest-dry-run MLFLOW_RECORDS=rawdata/logs/multirun/activationsearch
 ```
 
 ## Debug
 
 ```bash
-# shell onto the box (no SSH key, no inbound port)
 aws ssm start-session --target <instance_id>
 
 # on the instance:
@@ -85,13 +144,11 @@ journalctl -u mlflow -f
 sqlite3 /opt/mlflow/mlflow.db .tables
 ```
 
-## Tear down
+## Tear Down
 
 ```bash
-terraform destroy
+terraform -chdir=deploy/terraform destroy
 ```
 
-The artifact bucket is created with `force_destroy = true`, so `terraform
-destroy` empties it (including all object versions) and removes it cleanly. This
-is safe because the bucket holds no source-of-truth data (see ADR-0001); drop
-`force_destroy` if you ever store data there you want to protect from teardown.
+Prefer `make mlflow-stop` for ordinary cost control. `terraform destroy` removes
+the instance and loses the SQLite dashboard DB unless separately backed up.

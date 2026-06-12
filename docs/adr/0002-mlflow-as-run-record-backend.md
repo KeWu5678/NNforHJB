@@ -1,87 +1,70 @@
 ---
-status: proposed
+status: accepted
 ---
 
-# MLflow is a backend behind the Run Record interface, not a parallel tracker
+# MLflow is an optional dashboard projection of local Run Records
 
-We will expose MLflow as a swappable *backend* behind the existing
-`ExperimentRun` Run Record interface (`src/experiment_logging.py`),
-selected by environment: with `MLFLOW_TRACKING_URI` set, a Run Record will be
-logged to MLflow; unset, it will be written as local JSON (the current, and
-current-default, behavior). One interface, two adapters. We chose this over
-rewriting the legacy `src/mlflow_utils.py`, over making MLflow the sole store,
-and over running both stores in parallel.
+`ExperimentRun` is the central runtime API for experiment recording. Every run
+writes a local JSON **Run Record** and local **Run Artifacts** in the Hydra
+output directory. When `MLFLOW_TRACKING_URI` is set, the completed Run Record is
+also projected to MLflow so the MLflow UI can compare runs.
 
-**Implementation status: proposed, not yet built.** As of this ADR,
-`src/experiment_logging.py` always writes local JSON and has no
-`MLFLOW_TRACKING_URI` branch or MLflow adapter; `src/mlflow_utils.py` and
-`notebook/pdpa_vdp.ipynb` still exist unchanged. Everything below describes the
-intended design, not current behavior. Flip this ADR to `accepted` when the
-adapter lands.
+MLflow is therefore a dashboard/index, not the source of truth. Local JSON and
+local artifacts remain authoritative. The MLflow SQLite backend on EC2 can be
+preserved by stopping/starting the same instance; if the instance or backend DB
+is destroyed, the dashboard can be rebuilt from local Run Records later.
 
-## Considered options
+## Decision
 
-- **A standalone MLflow wrapper / generic logging core** — rejected: MLflow's
-  fluent API is already a generic logging layer, so a hand-rolled core over it
-  would be a shallow module. (This reverses an earlier inclination to keep MLflow
-  separate with "no abstraction" — that reasoning is moot now that the Run Record
-  interface already exists for its own, MLflow-independent reasons.)
-- **MLflow replaces the local JSON writer** — rejected: it would discard the
-  zero-dependency, offline, debuggable local default that the Run Record system
-  was deliberately built around.
-- **Local JSON and MLflow always written in parallel** — rejected: double
-  bookkeeping on every run and two stores that can silently drift.
-- **Keep the legacy `mlflow_utils.py` independent** — rejected: it logs the raw
-  `PDAP.fit()` result with duplicated metric loops and two inconsistent run
-  hierarchies; it is to be superseded. The MLflow adapter will log from the
-  canonical Run Record, not from PDAP internals.
+- Always write and keep the local JSON Run Record on `finish()` or `fail()`.
+- If `MLFLOW_TRACKING_URI` is set, publish dashboard metadata to MLflow after the
+  JSON record is written.
+- Do not upload artifacts to MLflow or S3 in v1. MLflow stores local artifact
+  paths as tags only.
+- Use MLflow's own run ID as the storage identity. The project `run_id` is a
+  human-readable run key and MLflow run name.
+- Generate project run IDs as
+  `{experiment_name}_{data_choice}_{YYYYMMDD}_{4hex}`, using the local date.
+
+## What MLflow Stores
+
+The intended MLflow use is cross-run comparison, not per-iteration training
+monitoring:
+
+- **Params:** flattened resolved config values and Hydra runtime choices.
+- **Metrics:** scalar summary metrics from the Run Record.
+- **Tags:** project `run_id`, status, local Run Record path, local artifact
+  paths, Hydra output directory/job metadata, and failure metadata when present.
+
+Per-iteration curves and the full `PDAP.fit()` result stay local in the saved
+pickle artifact. MLflow records the pickle path, but does not read or upload the
+pickle.
+
+## Considered Options
+
+- **MLflow replaces local JSON** — rejected because the EC2-hosted SQLite store
+  is a dashboard index and may be rebuilt; local records are the durable research
+  source of truth.
+- **Always write local JSON and MLflow** — rejected as a hard requirement because
+  offline runs should not need an MLflow server.
+- **Local JSON plus optional MLflow projection** — chosen because it keeps one
+  runtime API, preserves offline reproducibility, and still enables the MLflow
+  comparison UI when a tracking server is available.
+- **Upload artifacts to S3 via MLflow** — deferred. S3 is not required for the
+  current stop/start EC2 workflow because the dashboard history lives in the
+  SQLite backend on the instance's EBS volume.
 
 ## Consequences
 
-- Once built, switching local-vs-remote will be a pure environment change; no
-  code edits and no changes to how experiments are launched.
-- The vocabulary is fixed by the glossary (`CONTEXT.md`): an MLflow run *is* a
-  **Run Record** and an MLflow file *is* a **Run Artifact**. The
-  local-JSON-vs-MLflow split is a backend detail and is deliberately kept out of
-  the glossary.
-
-## What MLflow stores, and what stays local
-
-The intended use of MLflow is **a cross-config comparison dashboard**, not a
-training monitor. That fixes what each side holds:
-
-- **MLflow holds the matrix, summary-only.** One run per *config point*
-  `(activation, power, loss, use_sphere, seed, gamma, …)` — flat, not nested.
-  Gamma is an ordinary param, not a special axis or a nesting level. Every
-  dimension is logged as a **param**; the per-point summary scalars (`h1`, `n`,
-  `score`, the `best_*` fields) are logged as **metrics**. The comparison views
-  (runs table, parallel-coordinates, scatter) are chosen in the MLflow UI at
-  look-time, so logging richly keeps every view open. This is logged from the
-  canonical Run Record, so the "log from the record, not PDAP internals" rule
-  survives.
-- **Per-iteration training curves stay local.** They are deliberately *not*
-  logged to MLflow. The full `PDAP.fit()` result (loss/error curves, weights) is
-  saved as a sibling `result_<run_id>.pkl` Run Artifact on disk and loaded only
-  when a single run is inspected. MLflow records the pickle's filename as a
-  **tag** — a pointer to the local file, not the data.
-
-### Why curves are not in MLflow
-
-A reasonable reader will ask why the loss curves aren't in the tracking UI. The
-dashboard's job here is cross-config comparison, which the summary scalars
-cover; per-iteration series are needed only when drilling into a single run,
-where loading the local pickle is fine. Putting them in MLflow would force the
-adapter to read raw PDAP per-iteration internals — reversing the "log from the
-summary" rule for data that does not need to be central. Keeping curves local
-keeps the adapter thin and the MLflow store light.
-
-## Planned follow-up work (not done yet)
-
-- Add the MLflow adapter + `MLFLOW_TRACKING_URI` backend switch to
-  `src/experiment_logging.py`: one run per config point (gamma as an ordinary
-  param), summary scalars as metrics, the pickle filename as a tag — logged from
-  the canonical Run Record.
-- Retire `src/mlflow_utils.py` and update the `notebook/pdpa_vdp.ipynb` call
-  site once the adapter is proven.
-- Optional one-off: backfill pre-existing `models/*.pkl` results into MLflow via
-  a throwaway "JSON records → MLflow" script (not a maintained code path).
+- A run launched without `MLFLOW_TRACKING_URI` still produces complete local
+  records.
+- A run launched with `MLFLOW_TRACKING_URI` produces the same local records and
+  additionally appears in the MLflow UI.
+- Existing local Run Records can be uploaded without retraining via
+  `scripts/upload_run_records_to_mlflow.py`.
+- Stopping the EC2 instance preserves MLflow history as long as the EBS volume is
+  preserved. Destroying/replacing the backend requires either DB backup/restore
+  or replaying local JSON Run Records with
+  `scripts/upload_run_records_to_mlflow.py`.
+- MLflow logging must remain downstream of the Run Record and must not reach into
+  PDAP internals.
