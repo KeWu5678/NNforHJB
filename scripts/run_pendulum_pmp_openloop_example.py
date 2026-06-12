@@ -4,10 +4,13 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import json
 import sys
 import time
 from pathlib import Path
+
+import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -18,6 +21,7 @@ from src.OpenLoop.pendulum import (  # noqa: E402
     PendulumPmpSolverConfig,
     PendulumSwingUpProblem,
 )
+from src.OpenLoop.value_samples import ValueSamples  # noqa: E402
 from src.paths import DATA_DIR  # noqa: E402
 
 
@@ -36,6 +40,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--boundary-distance-power", type=float, default=0.8)
     parser.add_argument("--contour-delta", type=float, default=1.0)
     parser.add_argument("--periodic-copies", type=int, default=0)
+    parser.add_argument("--level-set-samples", type=int, default=2000)
     parser.add_argument("--output-dir", type=Path, default=DATA_DIR)
     parser.add_argument("--tag", type=str, default=None)
     parser.add_argument("--quiet", action="store_true")
@@ -54,6 +59,19 @@ def progress_printer(quiet: bool):
             print(f"processed {done}/{total}")
 
     return _progress
+
+
+def thin_value_samples(samples: ValueSamples, target_size: int) -> ValueSamples:
+    if target_size <= 0:
+        raise ValueError("level-set-samples must be positive")
+    if samples.size <= target_size:
+        return samples
+    indices = np.linspace(0, samples.size - 1, target_size, dtype=np.int64)
+    return ValueSamples(
+        x=samples.x[indices],
+        v=samples.v[indices],
+        dv=samples.dv[indices],
+    )
 
 
 def main() -> None:
@@ -79,6 +97,13 @@ def main() -> None:
     started = time.perf_counter()
     solution = solver.solve(progress=progress_printer(args.quiet))
     elapsed = time.perf_counter() - started
+    raw_sample_count = solution.value_samples.size
+    value_samples = thin_value_samples(solution.value_samples, args.level_set_samples)
+    solution = replace(
+        solution,
+        value_samples=value_samples,
+        diagnostics=replace(solution.diagnostics, retained_points=value_samples.size),
+    )
 
     paths = solution.save_dataset(args.output_dir, date_tag=date_tag)
     metadata = {
@@ -89,6 +114,8 @@ def main() -> None:
         "failed_path": str(paths["failed"]),
         "run_dir": str(paths["run_dir"]),
         "elapsed_seconds": elapsed,
+        "raw_retained_points": raw_sample_count,
+        "level_set_samples": args.level_set_samples,
         "problem": {
             "mass": problem.mass,
             "length": problem.length,
