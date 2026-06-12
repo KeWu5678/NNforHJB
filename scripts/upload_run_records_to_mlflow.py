@@ -1,17 +1,8 @@
 #!/usr/bin/env python3
 """Upload existing local Run Records to an MLflow tracking server.
 
-Examples:
-    MLFLOW_TRACKING_URI=http://127.0.0.1:5000 \
-      uv run python scripts/upload_run_records_to_mlflow.py
-
-    uv run python scripts/upload_run_records_to_mlflow.py \
-      rawdata/logs/multirun/activationsearch/1069/*.json \
-      --tracking-uri http://127.0.0.1:5000
-
-    # Upload only the latest FULL sweep (by its multirun.yaml launch marker):
-    uv run python scripts/upload_run_records_to_mlflow.py \
-      rawdata/logs/multirun/activationsearch --latest-run
+See deploy/README.md for usage and the `make mlflow-backfill*` targets.
+Run with --help for the full argument list.
 """
 
 from __future__ import annotations
