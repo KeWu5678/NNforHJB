@@ -1,0 +1,9 @@
+# Post-fit evaluation: global metrics PLUS relative errors split by distance to
+# the switching set (near vs far). Requires a precomputed per-sample distance
+# cache aligned to the dataset (see scripts/investigation/precompute_region_distances.py).
+# near = the lowest near_percentile% of validation samples by distance-to-switching-set
+# (a percentile, not an absolute band: sample spacing is anisotropic — dense along
+# trajectories, sparse transverse — so a fixed NN-scaled band captures ~nothing).
+kind: region_split
+near_percentile: 10.0
+distance_cache: Pendulum_20260609b_8f70cffb056147db813e959091a95e0c/Pendulum_pmp_value_samples_256_20260609b_region_distances.npz

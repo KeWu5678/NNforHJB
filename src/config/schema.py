@@ -75,11 +75,11 @@ class TrainingConfig:
     fit_outer_iterations: int = 20
     display_every: int = 2
     # insertion numeric constants (src/PDAP/insertion.py)
-    ins_merge_tol: float = 1e-2
-    lbfgs_lr: float = 1e-2
-    lbfgs_steps: int = 200
-    newton_tol: float = 1e-12
-    newton_max_iter: int = 50
+    ins_merge_tol: float = 1e-2    # cosine-similarity threshold for merging near-duplicate candidates (both methods)
+    lbfgs_lr: float = 1e-2        # L-BFGS step size for dual-profile maximisation inside candidate search (both methods)
+    lbfgs_steps: int = 200        # max L-BFGS iterations per candidate direction (both methods)
+    newton_tol: float = 1e-12     # relative residual tolerance for the Newton solve in finite_step (finite_step only)
+    newton_max_iter: int = 50     # max Newton iterations for the finite-step insertion weight solve (finite_step only)
 
 
 @dataclass
@@ -103,6 +103,30 @@ class DataConfig:
 
 
 @dataclass
+class EvalConfig:
+    """Post-fit evaluation: which metrics to compute on the fitted model.
+
+    ``kind="global"`` (the default) reproduces today's behavior — only the
+    global ``summary_metrics``.  ``kind="region_split"`` additionally reports
+    relative errors split by distance to a precomputed nonsmooth/switching set:
+    the validation samples whose distance is in the lowest ``near_percentile``
+    percent form the *near* region, the rest *far*. A percentile (rather than an
+    absolute band) is used because the samples are anisotropically spaced — dense
+    along trajectories, sparse transverse to the switching set — so a fixed
+    nearest-neighbor band captures essentially nothing.
+
+    ``distance_cache`` is a bare filename under ``DATA_DIR`` (or absolute) of an
+    ``.npz`` with per-sample ``distance`` to the switching set, aligned to the
+    dataset's sample order (see ``scripts/investigation/precompute_region_distances.py``).
+    It is parameter-free in ``near_percentile`` so one cache serves any split.
+    """
+
+    kind: str = "global"                  # "global" | "region_split"
+    near_percentile: float = 10.0         # near = lowest near_percentile% of distance
+    distance_cache: Optional[str] = None  # npz with per-sample distance to the switching set
+
+
+@dataclass
 class EnvConfig:
     """Runtime: random seed + logging.
 
@@ -121,6 +145,7 @@ class ExperimentConfig:
     model: ModelConfig = field(default_factory=ModelConfig)
     training: TrainingConfig = field(default_factory=TrainingConfig)
     data: DataConfig = field(default_factory=DataConfig)
+    eval: EvalConfig = field(default_factory=EvalConfig)
     env: EnvConfig = field(default_factory=EnvConfig)
     name: str = "run"
 
@@ -129,6 +154,7 @@ __all__ = [
     "ModelConfig",
     "TrainingConfig",
     "DataConfig",
+    "EvalConfig",
     "EnvConfig",
     "ExperimentConfig",
 ]
