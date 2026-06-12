@@ -1,0 +1,14 @@
+# @package _global_
+# activationsearch: sweep activations across datasets and model configurations.
+# Fixed settings: power, alpha, normalize.
+# Swept axes (via CLI): data, model.kind, model.insertion, model.activation,
+#   model.gamma, model.loss_weights — see `make activationsearch`.
+
+name: activationsearch
+
+model:
+  power: 1.0
+  alpha: 1e-5
+
+data:
+  normalize: true

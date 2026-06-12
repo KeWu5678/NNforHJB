@@ -1,12 +1,9 @@
 # @package _global_
-# penaltypowers_VDP experiment: signed/finite-step PDAP on normalized VDP data.
-# The fixed settings live here; Make owns the Hydra multirun sweep axes.
+# penaltypowers experiment: signed/finite-step PDAP penalty-power sweep.
+# The fixed settings live here; Make owns the Hydra multirun sweep axes:
+# data, homogeneous activation, power, gamma, and loss weights.
 
-name: penaltypowers_VDP
-
-data:
-  path: VDP_beta_0.1_grid_30x30.npy
-  normalize: true
+name: penaltypowers
 
 model:
   kind: signed

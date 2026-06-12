@@ -8,8 +8,6 @@ uploaded to MLflow for dashboard comparison. MLflow stores params, scalar
 metrics, status, Hydra metadata, and local artifact paths; it does not upload
 the `result_<run_id>.pkl` artifact in the current pipeline.
 
-### Runtime logging
-
 Start or connect to an MLflow tracking server first.
 
 For the EC2/Terraform deployment, provision once:
@@ -17,6 +15,8 @@ For the EC2/Terraform deployment, provision once:
 ```bash
 make mlflow-deploy
 ```
+
+### Runtime logging
 
 Then start the instance when needed and open the SSM tunnel in a dedicated
 terminal:
@@ -45,13 +45,13 @@ export MLFLOW_TRACKING_URI=http://127.0.0.1:5000
 Run a curated experiment through the Makefile:
 
 ```bash
-make activationsearch_VDP
+make activationsearch
 ```
 
 Or run the lower-level Hydra training entrypoint directly:
 
 ```bash
-uv run python scripts/train.py +experiment=activationsearch_VDP
+uv run python scripts/train.py +experiment=activationsearch data=pendulum
 ```
 
 At `run.finish()`, the script writes the local JSON Run Record, keeps it on disk,
@@ -66,35 +66,48 @@ run is local-only. Project run IDs use:
 
 Existing JSON Run Records under `rawdata/logs/multirun` can be uploaded to
 MLflow without rerunning training. You still need a reachable MLflow tracking
-server: use an already-running local server, or start the existing EC2 instance
-and tunnel to it. Provision with `make mlflow-deploy` only if the MLflow EC2
-infrastructure does not exist yet.
+server. Provision with `make mlflow-deploy` only if the MLflow EC2 infrastructure
+does not exist yet.
+
+For the EC2 server, boot the instance and open the tunnel first (same as a live
+run):
+
+```bash
+make mlflow-start
+make mlflow-tunnel   # keep running in a dedicated terminal
+```
+
+For a local server, just have `mlflow server` running instead — no start/tunnel
+needed. Then point at the tracking server and backfill:
 
 ```bash
 export MLFLOW_TRACKING_URI=http://127.0.0.1:5000
 make mlflow-backfill
 ```
 
-For a sweep directory such as `rawdata/logs/multirun/activationsearch_VDP`, this
-uploads every JSON record in that directory. To upload only the newest immediate
-Hydra job directory under each input directory:
+For a sweep directory such as `rawdata/logs/multirun/activationsearch`, this
+uploads every JSON record in that directory — including stale job dirs left over
+from earlier sweeps. To upload only the **latest full sweep**, use
+`mlflow-backfill-latest`. It finds the sweep's `multirun.yaml` launch marker
+(Hydra rewrites it on every sweep) and uploads only the records written at or
+after that marker, dropping leftovers from previous sweeps:
 
 ```bash
-make mlflow-backfill-latest MLFLOW_RECORDS=rawdata/logs/multirun/activationsearch_VDP
+make mlflow-backfill-latest MLFLOW_RECORDS=rawdata/logs/multirun/activationsearch
 ```
 
 Limit upload to one experiment or one Hydra job directory:
 
 ```bash
-make mlflow-backfill MLFLOW_RECORDS=rawdata/logs/multirun/activationsearch_VDP
-make mlflow-backfill MLFLOW_RECORDS=rawdata/logs/multirun/activationsearch_VDP/signed_profile
+make mlflow-backfill MLFLOW_RECORDS=rawdata/logs/multirun/activationsearch
+make mlflow-backfill MLFLOW_RECORDS=rawdata/logs/multirun/activationsearch/1069
 ```
 
 Preview what would be uploaded without calling MLflow:
 
 ```bash
 make mlflow-backfill-dry-run
-make mlflow-backfill-latest-dry-run MLFLOW_RECORDS=rawdata/logs/multirun/activationsearch_VDP
+make mlflow-backfill-latest-dry-run MLFLOW_RECORDS=rawdata/logs/multirun/activationsearch
 ```
 
 The importer reads each Run Record JSON and, for older records, enriches it with
@@ -114,6 +127,3 @@ make mlflow-stop
 ```insertion``` under the PDPA.py, it does the follwing things:
 the function ```sample_uniform_sphere_points``` finds *** N *** initial value of the neurons.
 the function ```local_maximize``` finds for each initial value, the local maximum of the funtion ```profile```, which calculates the dual profile for each to-be-inserted neuron.
-
-
-
