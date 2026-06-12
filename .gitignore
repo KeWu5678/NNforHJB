@@ -63,3 +63,6 @@ autoresearch/**/results.tsv
 autoresearch/**/runs/
 autoresearch/**/*.json
 autoresearch/**/*.log
+
+# ---- Private research notes (theory program) ----
+docs/research/
